@@ -1,0 +1,201 @@
+Australia - Adelaide
+Australia - Brisbane
+Australia - Melbourne
+Australia - Perth
+Australia - Sydney
+Australia - Sydney - 2
+Bhutan
+Brunei
+Cambodia
+Guam
+Hong Kong - 1
+Hong Kong - 2
+India (via Singapore)
+India (via UK)
+Indonesia
+Japan - Osaka
+Japan - Shibuya
+Japan - Tokyo
+Japan - Yokohama
+Kazakhstan
+Laos
+Macau
+Malaysia
+Mongolia
+Myanmar
+Nepal
+New Zealand
+Pakistan
+Philippines
+Pick for Me
+Singapore - CBD
+Singapore - Jurong
+Singapore - Marina Bay
+South Korea - 2
+Sri Lanka
+Taiwan - 3
+Thailand
+Uzbekistan
+Vietnam
+Argentina
+Bahamas
+Bermuda
+Bolivia
+Brazil
+Brazil - 2
+Canada - Montreal
+Canada - Toronto
+Canada - Toronto - 2
+Canada - Vancouver
+Cayman Islands
+Chile
+Colombia
+Costa Rica
+Cuba
+Dominican Republic
+Ecuador
+Guatemala
+Honduras
+Jamaica
+Mexico
+Panama
+Peru
+Puerto Rico
+Trinidad and Tobago
+Uruguay
+USA - Albuquerque
+USA - Anchorage
+USA - Atlanta
+USA - Baltimore
+USA - Billings
+USA - Birmingham
+USA - Boise
+USA - Boston
+USA - Bridgeport
+USA - Burlington
+USA - Charleston - South Carolina
+USA - Charleston - West Virginia
+USA - Charlotte
+USA - Cheyenne
+USA - Chicago
+USA - Columbus
+USA - Dallas
+USA - Denver
+USA - Des Moines
+USA - Detroit
+USA - Fargo
+USA - Honolulu
+USA - Houston
+USA - Indianapolis
+USA - Jackson
+USA - Las Vegas
+USA - Lincoln Park
+USA - Little Rock
+USA - Los Angeles - 1
+USA - Los Angeles - 2
+USA - Los Angeles - 3
+USA - Los Angeles - 5
+USA - Louisville
+USA - Manchester
+USA - Miami
+USA - Miami - 2
+USA - Milwaukee
+USA - Minneapolis
+USA - Nashville
+USA - New Jersey - 1
+USA - New Jersey - 2
+USA - New Jersey - 3
+USA - New Orleans
+USA - New York
+USA - Oklahoma City
+USA - Omaha
+USA - Philadelphia
+USA - Phoenix
+USA - Portland - Maine
+USA - Portland - Oregon
+USA - Providence
+USA - Salt Lake City
+USA - San Francisco
+USA - Santa Monica
+USA - Seattle
+USA - Sioux Falls
+USA - St. Louis
+USA - Tampa - 1
+USA - Virginia Beach
+USA - Washington DC
+USA - Wichita
+USA - Wilmington
+Venezuela
+Albania
+Andorra
+Armenia
+Austria
+Azerbaijan
+Belarus
+Belgium
+Bosnia and Herzegovina
+Bulgaria
+Croatia
+Cyprus
+Czech Republic
+Denmark
+Estonia
+Finland
+France - Alsace
+France - Marseille
+France - Paris - 2
+France - Strasbourg
+Georgia
+Germany - Frankfurt - 1
+Germany - Frankfurt - 3
+Germany - Nuremberg
+Greece
+Hungary
+Iceland
+Ireland
+Isle of Man
+Italy - Cosenza
+Italy - Naples
+Jersey
+Latvia
+Liechtenstein
+Lithuania
+Luxembourg
+Malta
+Moldova
+Monaco
+Montenegro
+Netherlands - Amsterdam
+Netherlands - Rotterdam
+Netherlands - The Hague
+North Macedonia
+Norway
+Poland
+Portugal
+Romania
+Serbia
+Slovakia
+Slovenia
+Spain - Barcelona
+Spain - Barcelona - 2
+Spain - Madrid
+Sweden
+Sweden - 2
+Switzerland
+Turkey
+UK - Docklands
+UK - East London
+UK - London
+UK - Midlands
+UK - Tottenham
+UK - Wembley
+Ukraine
+Algeria
+Egypt
+Ghana
+Israel
+Kenya
+Lebanon
+Morocco
+South Africa
+United Arab Emirates

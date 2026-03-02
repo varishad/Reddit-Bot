@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Sensitive data (HARDCODED KEYS)
+config.py
+saved_credentials.json
+
+# Local config
+*.env
+.env
+.python-version
+
+# IDEs
+.vscode/
+.idea/
+
+# Bot specific
+.profiles/
+*.log
+results.json
+reddit_login_results.xlsx
+test_output.txt
+test_error.txt
+dist/
+build/
+*.spec
+*.rar
+*.zip
+*.bat
+*.command
