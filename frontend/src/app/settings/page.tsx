@@ -114,7 +114,7 @@ export default function SettingsPage() {
                 </Section>
 
                 {/* Live Performance */}
-                <div className="glass rounded-[32px] p-8 border border-white/5 relative overflow-hidden group">
+                <div className="glass rounded-3xl p-8 border border-white/5 relative overflow-hidden group">
                     <div className="absolute top-0 left-0 w-1 h-full bg-accent/20 group-hover:bg-accent transition-colors duration-500" />
                     <div className="flex items-center gap-3 mb-6">
                         <div className="p-2 rounded-xl bg-white/5 border border-white/10 group-hover:border-accent/30 transition-all">
@@ -239,7 +239,7 @@ export default function SettingsPage() {
 
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
     return (
-        <div className="glass rounded-[32px] p-8 border border-white/5 relative overflow-hidden group">
+        <div className="glass rounded-3xl p-8 border border-white/5 relative overflow-hidden group">
             <div className="absolute top-0 left-0 w-1 h-full bg-accent/20 group-hover:bg-accent transition-colors duration-500" />
             <div className="flex items-center gap-3 mb-6">
                 <div className="p-2 rounded-xl bg-white/5 border border-white/10 group-hover:border-accent/30 transition-all">

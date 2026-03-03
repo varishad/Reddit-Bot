@@ -3,24 +3,38 @@ Typing module - Human-like typing simulation and input field management.
 """
 import random as _random
 from playwright.sync_api import Locator
-from config import HUMAN_TYPING_DELAY_MIN_MS, HUMAN_TYPING_DELAY_MAX_MS
+from config import HUMAN_TYPING_DELAY_MIN_MS, HUMAN_TYPING_DELAY_MAX_MS, INSTANT_FILL_ENABLED
 
 
 def type_human(element: Locator, text: str) -> None:
     """
-    Type with per-character delay to simulate human typing.
-    
-    Args:
-        element: Playwright locator for the input element
-        text: Text to type
+    Type with per-character delay to simulate human typing, 
+    or use instant fill if configured.
     """
+    if INSTANT_FILL_ENABLED:
+        fill_instant(element, text)
+        return
+
     try:
-        delay = lambda: _random.uniform(HUMAN_TYPING_DELAY_MIN_MS, HUMAN_TYPING_DELAY_MAX_MS)
+        delay = lambda: _random.uniform(HUMAN_TYPING_DELAY_MIN_MS, HUMAN_TYPING_DELAY_MAX_MS) / 1000.0
         # Playwright element.type supports delay per char
         element.type(text, delay=delay())
     except Exception:
         try:
             element.fill(text)
+        except Exception:
+            pass
+
+
+def fill_instant(element: Locator, text: str) -> None:
+    """
+    Standard automated filling (no delay).
+    """
+    try:
+        element.fill(text)
+    except Exception:
+        try:
+            element.type(text)
         except Exception:
             pass
 

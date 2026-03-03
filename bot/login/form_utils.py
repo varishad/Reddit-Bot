@@ -365,14 +365,18 @@ def submit_form(page: Page, password_field: Optional[Locator] = None, log_callba
     form_submitted = False
     
     try:
-        if HUMANIZE_INPUT:
+        from config import INSTANT_FILL_ENABLED
+        if HUMANIZE_INPUT and not INSTANT_FILL_ENABLED:
             from bot.humanization.behavior import human_pause as human_pause_util
             human_pause_util()
         
         # Use Enter key (fastest), with slight delay
         if password_field:
-            log("Submitted form via Enter key")
-            password_field.press('Enter')
+            if not INSTANT_FILL_ENABLED:
+                password_field.press('Enter')
+            else:
+                # Truly instant
+                password_field.press('Enter', delay=0)
             form_submitted = True
     except:
         pass

@@ -17,8 +17,9 @@
   --color-accent: var(--accent);
   --color-success: var(--success);
 
-  --radius-xl: 1.5rem;
-  --radius-2xl: 2rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 1.75rem;
 }
 
 body {

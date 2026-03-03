@@ -18,7 +18,7 @@ def get_or_create_page(context: BrowserContext, prefer_existing: bool = True) ->
     """
     if prefer_existing:
         try:
-            pages = getattr(context, "pages", [])
+            pages = context.pages
             if pages:
                 return pages[0]
         except Exception:
@@ -35,7 +35,7 @@ def close_extra_pages(context: BrowserContext, keep_first: bool = True) -> None:
         keep_first: If True, keep the first page and close the rest
     """
     try:
-        pages = getattr(context, "pages", [])
+        pages = context.pages
         if not pages:
             return
         

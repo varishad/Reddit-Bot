@@ -47,10 +47,13 @@ async def auth_middleware(request: Request, call_next):
 # --- Shared State Management ---
 class AppState:
     def __init__(self):
+        logger.info("Initializing AppState...")
         self.db = Database()
-        self.vpn_manager = ExpressVPNManager()
+        self.vpn_manager = ExpressVPNManager(log_callback=log_to_state)
         self.bot_instance: Optional[RedditBotEngine] = None
         self.is_running = False
+        self.is_starting = False  # Track pre-flight state
+        self.is_stopping = False
         self.logs = deque(maxlen=1000)
         self.stats = {
             "total": 0,
@@ -118,7 +121,13 @@ class AppState:
         }
         self.logs.clear()
 
-state = AppState()
+try:
+    state = AppState()
+    logger.info("✅ Global AppState created successfully")
+except Exception as e:
+    logger.error(f"❌ CRITICAL: Failed to initialize AppState: {e}")
+    # Create a minimal state if possible to avoid crashes on import, but this is a fatal error
+    raise
 
 # --- Helpers ---
 def log_to_state(message: str, level: str = "info"):
@@ -152,25 +161,29 @@ def progress_update(snapshot: Dict[str, Any]):
 # --- App Lifecycle ---
 @app.on_event("startup")
 async def startup_event():
-    """Perform async startup tasks."""
+    """Perform async startup tasks in background to avoid blocking API readiness."""
     logger.info("Application starting up...")
-    try:
-        is_connected, loc = await state.vpn_manager.get_status()
-        state.current_vpn_location = loc if is_connected else "Disconnected"
-        logger.info(f"Initial VPN Status: {state.current_vpn_location}")
-        
-        # Try to bypass the current Python process from VPN to avoid dashboard connectivity issues
-        if "expressvpnctl" in getattr(state.vpn_manager, "expressvpn_path", "").lower():
-            import sys
-            logger.info(f"🛡️ Attempting to bypass VPN for Python: {sys.executable}")
-            success, msg = await state.vpn_manager.add_app_to_bypass(sys.executable)
-            if success:
-                logger.info(f"✅ VPN Bypass active: {msg}")
-            else:
-                logger.warning(f"⚠️ VPN Bypass failed: {msg}")
-    except Exception as e:
-        logger.error(f"Failed to get initial VPN status: {e}")
-        state.current_vpn_location = "Error"
+    
+    async def initialize_vpn():
+        try:
+            is_connected, loc = await state.vpn_manager.get_status()
+            state.current_vpn_location = loc if is_connected else "Disconnected"
+            logger.info(f"Initial VPN Status: {state.current_vpn_location}")
+            
+            # Try to bypass the current Python process from VPN to avoid dashboard connectivity issues
+            if "expressvpnctl" in getattr(state.vpn_manager, "expressvpn_path", "").lower():
+                import sys
+                logger.info(f"🛡️ Attempting to bypass VPN for Python: {sys.executable}")
+                success, msg = await state.vpn_manager.add_app_to_bypass(sys.executable)
+                if success:
+                    logger.info(f"✅ VPN Bypass active: {msg}")
+                else:
+                    logger.warning(f"⚠️ VPN Bypass failed: {msg}")
+        except Exception as e:
+            logger.error(f"Failed to get initial VPN status: {e}")
+            state.current_vpn_location = "Error"
+            
+    asyncio.create_task(initialize_vpn())
 
 # --- Background Worker ---
 def bot_worker(file_path: str, parallel_browsers: int):
@@ -432,35 +445,56 @@ async def start_bot(
     if state.is_running:
         return {"status": "error", "message": "Bot is already running."}
     
-    # VPN Check and Auto-Connect
+    if state.is_starting:
+        return {"status": "error", "message": "Bot is already starting (VPN pre-flight in progress). Please wait."}
+    
+    state.is_starting = True
     try:
-        log_to_state("🔍 Checking VPN status...")
-        is_connected, location = await state.vpn_manager.get_status()
+        from config import VPN_ALWAYS_ROTATE_AT_START, VPN_ENABLED
         
-        if is_connected:
-            state.current_vpn_location = location
-            log_to_state(f"✅ VPN already connected: {location}")
-        else:
-            log_to_state("🔒 VPN not connected - attempting to connect...")
-            success, msg = await state.vpn_manager.connect_random_location()
-            if not success:
-                state.current_vpn_location = "Failed to connect"
-                if VPN_REQUIRE_CONNECTION:
-                    log_to_state(f"❌ VPN Connection required but failed: {msg}", "error")
-                    return {"status": "error", "message": f"VPN Auto-connect failed: {msg}. Connection is mandatory."}
-                log_to_state(f"⚠️ VPN Auto-connect failed: {msg}. Continuing as per config.", "warning")
+        if VPN_ENABLED:
+            if VPN_ALWAYS_ROTATE_AT_START:
+                log_to_state("🔄 [VPN] Pre-flight: Connecting to random server for maximum stealth...")
+                success, msg = await state.vpn_manager.connect_random_location()
+                if success:
+                    state.current_vpn_location = msg
+                    log_to_state(f"✅ VPN Connected: {msg}")
+                else:
+                    state.current_vpn_location = "Failed to connect"
+                    if VPN_REQUIRE_CONNECTION:
+                        log_to_state(f"❌ VPN Connection required but failed: {msg}", "error")
+                        return {"status": "error", "message": f"VPN Auto-connect failed: {msg}. Connection is mandatory."}
+                    log_to_state(f"⚠️ VPN Auto-connect failed: {msg}. Continuing as per config.", "warning")
             else:
-                state.current_vpn_location = msg
-                log_to_state(f"✅ VPN Connected! Location: {msg}")
+                log_to_state("🔍 Checking VPN status...")
+                is_connected, location = await state.vpn_manager.get_status()
+                
+                if is_connected:
+                    state.current_vpn_location = location
+                    log_to_state(f"✅ VPN already connected: {location}")
+                else:
+                    log_to_state("🔒 VPN not connected - attempting to connect...")
+                    success, msg = await state.vpn_manager.connect_random_location()
+                    if not success:
+                        state.current_vpn_location = "Failed to connect"
+                        if VPN_REQUIRE_CONNECTION:
+                            log_to_state(f"❌ VPN Connection required but failed: {msg}", "error")
+                            return {"status": "error", "message": f"VPN Auto-connect failed: {msg}. Connection is mandatory."}
+                        log_to_state(f"⚠️ VPN Auto-connect failed: {msg}. Continuing as per config.", "warning")
+                    else:
+                        state.current_vpn_location = msg
+                        log_to_state(f"✅ VPN Connected! Location: {msg}")
+        
+        state.reset_stats()
+        background_tasks.add_task(bot_worker, file_path, parallel_browsers)
+        return {"status": "success", "message": "Bot started in background."}
     except Exception as e:
         state.current_vpn_location = "Error"
         logger.exception("VPN Check/Connect failed")
-        if VPN_REQUIRE_CONNECTION:
-            return {"status": "error", "message": f"VPN check/connect failed: {str(e)}"}
-    
-    state.reset_stats()
-    background_tasks.add_task(bot_worker, file_path, parallel_browsers)
-    return {"status": "success", "message": "Bot started in background."}
+        log_to_state(f"❌ Startup Error: {str(e)}", "error")
+        return {"status": "error", "message": f"VPN check/connect failed: {str(e)}"}
+    finally:
+        state.is_starting = False
 
 @app.post("/bot/stop")
 async def stop_bot():

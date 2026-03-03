@@ -92,7 +92,7 @@ def perform_final_retries(engine, results: List[Dict]) -> List[Dict]:
                             time.sleep(2)
 
                 try:
-                    browser, context = engine._launch_browser_and_context(playwright)
+                    browser, context = engine._launch_browser_and_context_sync(playwright)
                     pages = getattr(context, "pages", [])
                     page = pages[0] if pages else context.new_page()
                     for p in pages[1:]:

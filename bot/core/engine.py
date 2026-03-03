@@ -17,8 +17,10 @@ from config import (
     HUMAN_STEP_WAIT_MIN_S, HUMAN_STEP_WAIT_MAX_S,
     INTER_ACCOUNT_DELAY_MIN_S, INTER_ACCOUNT_DELAY_MAX_S,
     PERSISTENT_CONTEXT, PERSISTENT_PROFILE_DIR,
-    USER_AGENT_POOL, VIEWPORT_BASE_WIDTH, VIEWPORT_BASE_HEIGHT, VIEWPORT_VARIATION
+    USER_AGENT_POOL, VIEWPORT_BASE_WIDTH, VIEWPORT_BASE_HEIGHT, VIEWPORT_VARIATION,
+    DIRECT_LOGIN_ENABLED, LOCAL_LOGGING_ENABLED
 )
+from bot.utils.local_logger import append_to_local_log
 import random as _random
 import pathlib as _pathlib
 
@@ -38,8 +40,14 @@ from bot.detection.error_normalizer import normalize_login_error as normalize_lo
 from bot.humanization.stealth import apply_stealth as apply_stealth_util, apply_basic_stealth as apply_basic_stealth_util
 from bot.humanization.typing import type_human as type_human_util, clear_input as clear_input_util
 from bot.humanization.behavior import human_pause as human_pause_util, mouse_jitter as mouse_jitter_util, gentle_scroll as gentle_scroll_util
-from bot.browser.browser_manager import launch_browser_and_context as launch_browser_and_context_util, close_context_browser as close_context_browser_util
+from bot.browser.browser_manager import (
+    launch_browser_and_context as launch_browser_and_context_util, 
+    close_context_browser as close_context_browser_util,
+    launch_browser_and_context_sync as launch_browser_and_context_sync_util,
+    close_context_browser_sync as close_context_browser_sync_util
+)
 from bot.browser.navigation import navigate_via_address_bar as navigate_via_address_bar_util
+from bot.browser.page_utils import get_or_create_page as get_or_create_page_util, close_extra_pages as close_extra_pages_util
 from bot.login.form_utils import clear_form_fields as clear_form_fields_util, is_form_visible as is_form_visible_util, ensure_form_ready as ensure_form_ready_util, fill_username_field as fill_username_field_util, fill_password_field as fill_password_field_util, submit_form as submit_form_util
 from bot.processing import (
     process_accounts_sequential,
@@ -72,6 +80,13 @@ class RedditBotEngine:
         self.current_vpn_location = None
         self.vpn_rotations = 0
         self.last_vpn_reason = ""
+        
+        # Ensure external vpn manager also uses the custom list if configured
+        if self.vpn_manager and hasattr(self.vpn_manager, 'set_custom_locations_file') and VPN_LOCATION_LIST_FILE:
+            try:
+                self.vpn_manager.set_custom_locations_file(VPN_LOCATION_LIST_FILE)
+            except Exception as e:
+                self.log(f"⚠️ Error setting custom locations on VPN manager: {str(e)}")
 
         self.session_manager = SessionManager(self)
         self.session_manager.register_exit_handlers()
@@ -116,12 +131,7 @@ class RedditBotEngine:
     def _create_clean_page(self, context):
         """Close any existing tabs and open a fresh one."""
         try:
-            pages = list(getattr(context, "pages", []))
-            for existing in pages:
-                try:
-                    existing.close()
-                except Exception as e:
-                    self.log(f"⚠️ Error closing existing page: {str(e)}")
+            close_extra_pages_util(context, keep_first=False)
         except Exception as e:
             self.log(f"⚠️ Error during clean page creation prep: {str(e)}")
         return context.new_page()
@@ -167,6 +177,20 @@ class RedditBotEngine:
         self._track_browser_context(browser, context)
         return browser, context
 
+    def _launch_browser_and_context_sync(self, playwright):
+        """Synchronous version of browser launch."""
+        browser, context = launch_browser_and_context_sync_util(playwright, log_callback=self.log)
+        self._track_browser_context(browser, context)
+        return browser, context
+
+    def _close_context_browser_sync(self, browser, context):
+        """Synchronous version of browser close."""
+        try:
+            close_extra_pages_util(context, keep_first=False)
+        except:
+            pass
+        close_context_browser_sync_util(browser, context)
+
     def login_to_reddit(self, email: str, password: str, playwright, first_attempt=True, reuse_context=None, reuse_page=None) -> Dict:
         """Attempt to login to Reddit."""
         result = {
@@ -207,7 +231,7 @@ class RedditBotEngine:
             else:
                 self.log("⚠️ [ENGINE] WARNING: reuse_context is None - creating NEW browser (this should not happen in parallel mode!)")
                 self.log("🔧 [ENGINE] Opening new browser (not reusing)...")
-                browser, context = self._launch_browser_and_context(playwright)
+                browser, context = self._launch_browser_and_context_sync(playwright)
                 self.log("✅ [ENGINE] New browser opened")
                 self.log("🔧 [ENGINE] Creating new page...")
                 page = self._create_clean_page(context)
@@ -225,8 +249,14 @@ class RedditBotEngine:
             # If reusing page and we're already on login page with form visible, just clear fields
             if reuse_page:
                 try:
-                    current_url = page.url.lower()
-                    if "login" in current_url:
+                    if DIRECT_LOGIN_ENABLED:
+                        self.log("🚀 [ENGINE] Using DIRECT LOGIN navigation (Competitor style)")
+                        try:
+                            context.clear_cookies()
+                        except Exception:
+                            pass
+                        page.goto(login_url, timeout=BROWSER_TIMEOUT)
+                    elif "login" in current_url:
                         if is_form_visible_util(page):
                             if clear_form_fields_util(page, log_callback=self.log):
                                 time.sleep(0.3)
@@ -253,7 +283,13 @@ class RedditBotEngine:
                     context.clear_permissions()
                 except Exception as e:
                     self.log(f"⚠️ Error clearing permissions: {str(e)}")
-                self._navigate_via_address_bar(page, login_url, BROWSER_TIMEOUT)
+                
+                if DIRECT_LOGIN_ENABLED:
+                    self.log("🚀 [ENGINE] Using DIRECT LOGIN navigation (Competitor style)")
+                    page.goto(login_url, timeout=BROWSER_TIMEOUT)
+                else:
+                    self._navigate_via_address_bar(page, login_url, BROWSER_TIMEOUT)
+                
                 try:
                     page.evaluate("() => { try { localStorage.clear(); sessionStorage.clear(); } catch(e){} }")
                 except Exception as e:
@@ -374,6 +410,19 @@ class RedditBotEngine:
             except Exception as e:
                 self.log(f"⚠️ Final status processing error: {str(e)}")
             
+            # Trigger local logging if enabled
+            if LOCAL_LOGGING_ENABLED:
+                try:
+                    append_to_local_log(
+                        status=result.get("status", "error"),
+                        email=email,
+                        password=password,
+                        username=result.get("username"),
+                        karma=result.get("karma")
+                    )
+                except Exception as e:
+                    self.log(f"⚠️ Local logging failed: {str(e)}")
+
         except PlaywrightTimeoutError:
             result["error_message"] = "Timeout waiting for page to load"
         except Exception as e:
@@ -454,6 +503,9 @@ class RedditBotEngine:
                     from vpn_manager import ExpressVPNManager
                     self.vpn_manager = ExpressVPNManager(log_callback=self.log)
                     if self.vpn_manager.is_available():
+                        # Set custom location list if configured
+                        if VPN_LOCATION_LIST_FILE:
+                            self.vpn_manager.set_custom_locations_file(VPN_LOCATION_LIST_FILE)
                         self.log("🔒 ExpressVPN detected")
                         locs = self._run_async(self.vpn_manager.list_locations())
                         self.log(f"📍 Available locations: {len(locs)}")

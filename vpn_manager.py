@@ -35,12 +35,34 @@ class ExpressVPNManager:
         self.available_locations = []
         self.current_location = None
         self.is_connected = False
+        # Custom location tracking
+        self.custom_locations_file = None
+        self.custom_locations = []
         # Smart selection memory
         self._location_last_used: Dict[str, float] = {}
         self._location_score: Dict[str, float] = {}  # higher is better (success bias)
         
         # Find ExpressVPN installation
         self._find_expressvpn()
+
+    def set_custom_locations_file(self, file_path: str):
+        """Set a custom file to load locations from."""
+        self.custom_locations_file = file_path
+        self._load_custom_locations()
+
+    def _load_custom_locations(self):
+        """Load locations from the custom file."""
+        if not self.custom_locations_file or not os.path.exists(self.custom_locations_file):
+            self.custom_locations = []
+            return
+
+        try:
+            with open(self.custom_locations_file, 'r') as f:
+                self.custom_locations = [line.strip() for line in f if line.strip()]
+            self.log(f"✅ [VPN] Loaded {len(self.custom_locations)} custom location(s) from {self.custom_locations_file}")
+        except Exception as e:
+            self.log(f"⚠️ [VPN] Error loading custom locations: {str(e)}")
+            self.custom_locations = []
     
     def get_diagnostics(self) -> Dict[str, Any]:
         """Check for common installation issues."""
@@ -103,38 +125,51 @@ class ExpressVPNManager:
 
     def _find_expressvpn(self) -> bool:
         """Find ExpressVPN executable."""
+        self.log("🔍 [VPN] Searching for ExpressVPN executable...")
         for path in self.expressvpn_paths:
             if path == "expressvpn":
                 # Check if in PATH
                 try:
+                    self.log("🔍 Checking 'expressvpn' in PATH...")
                     result = subprocess.run(
                         ["expressvpn", "status"],
                         capture_output=True,
                         text=True,
-                        timeout=5,
+                        timeout=3, # Reduced timeout for discovery
                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                     )
                     if result.returncode == 0 or "Not connected" in result.stdout or "Connected" in result.stdout:
                         self.expressvpn_path = "expressvpn"
+                        self.log("✅ Found expressvpn in PATH")
                         return True
                 except:
                     continue
             else:
                 if os.path.exists(path):
                     self.expressvpn_path = path
+                    self.log(f"✅ Found ExpressVPN at: {path}")
+                    
+                    # On macOS, if we found it in Applications or common bin, don't block by testing it
+                    # (it's very likely valid and testing it might hang/trigger OS prompts)
+                    if os.name != 'nt' and ("/Applications/" in path or "/bin/" in path):
+                        self.log("🚀 Trusting path on macOS without command test")
+                        return True
+                        
                     # Verify it actually works by testing status command
                     try:
+                        self.log(f"🔍 Verifying: {path} status...")
                         result = subprocess.run(
                             [path, "status"],
                             capture_output=True,
                             text=True,
-                            timeout=5,
+                            timeout=3,
                             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                         )
                         # If we get any output (even error), the executable exists and is accessible
                         if result.stdout or result.stderr:
                             return True
-                    except:
+                    except Exception as e:
+                        self.log(f"⚠️ Verification failed for {path}: {e}")
                         # If subprocess fails, still return True if file exists
                         # (might be permission issue, but file is there)
                         pass
@@ -193,12 +228,13 @@ class ExpressVPNManager:
                             self.expressvpn_path = exe_path
                             return True
         
-        return False
-
+        self.log("❌ [VPN] ExpressVPN not found in any common locations.")
         return False
 
     async def _run_command_async(self, cmd: List[str], timeout: int = 30) -> Tuple[int, str, str]:
         """Run a command asynchronously and return (returncode, stdout, stderr)."""
+        if timeout > 0:
+            self.log(f"⚡ [VPN] Executing: {' '.join(cmd)} (Timeout: {timeout}s)")
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -217,6 +253,17 @@ class ExpressVPNManager:
 
     async def ensure_app_running(self) -> bool:
         """Attempt to open the ExpressVPN GUI app depending on the OS."""
+        try:
+            from config import VPN_SILENT_MODE
+        except ImportError:
+            VPN_SILENT_MODE = False
+
+        if VPN_SILENT_MODE:
+            # In silent mode, we avoid GUI popups. The CLI service should ideally
+            # be managed by the OS (launchd/services.msc).
+            # We just verify the CLI is basically functional.
+            return self.is_available()
+
         try:
             if os.name == 'nt':  # Windows
                 ui_paths = [
@@ -260,12 +307,11 @@ class ExpressVPNManager:
         try:
             # For v12 (expressvpnctl), we can get precise connection state
             if is_ctl:
-                rc, stdout, stderr = await self._run_command_async([self.expressvpn_path, "get", "connectionstate"], timeout=10)
+                rc, stdout, stderr = await self._run_command_async([self.expressvpn_path, "get", "connectionstate"], timeout=15)
                 state = stdout.strip()
-                self.log(f"🔎 VPN Connection State: {state}")
                 if state == "Connected":
                     # Get location too
-                    rc_loc, stdout_loc, stderr_loc = await self._run_command_async([self.expressvpn_path, "status"], timeout=10)
+                    rc_loc, stdout_loc, stderr_loc = await self._run_command_async([self.expressvpn_path, "status"], timeout=15)
                     output_loc = (stdout_loc + stderr_loc).lower()
                     match = re.search(r"connected to (.+)", stdout_loc + stderr_loc, re.IGNORECASE)
                     loc = match.group(1).strip() if match else "Connected"
@@ -319,16 +365,23 @@ class ExpressVPNManager:
         if not self.is_available():
             return []
         
+        if self.custom_locations:
+            return self.custom_locations
+
         if self.available_locations:
             return self.available_locations
         
         is_ctl = "expressvpnctl" in self.expressvpn_path.lower()
         
         try:
+            self.log("📋 [VPN] Fetching available locations list...")
             if is_ctl:
                 returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "get", "regions"], timeout=30)
             else:
                 returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "list"], timeout=30)
+            
+            if returncode != 0:
+                self.log(f"⚠️ [VPN] Failed to list locations (RC: {returncode}). Output: {stdout + stderr}")
             
             locations = []
             lines = stdout.split('\n')
@@ -450,7 +503,10 @@ class ExpressVPNManager:
             await asyncio.sleep(1)
             
             # Connect to location
-            returncode, stdout, stderr = await self._run_command_async(cmd, timeout=60)
+            returncode, stdout, stderr = await self._run_command_async(cmd, timeout=90)
+            
+            if returncode != 0:
+                self.log(f"❌ [VPN] Connect command failed (RC: {returncode}). Error: {stderr or stdout}")
             
             # Check for elevation error
             output = (stdout + stderr).lower()
@@ -505,9 +561,8 @@ class ExpressVPNManager:
                             return False, f"Connection status unclear. Location: {location_from_output}, but status check failed. Try checking ExpressVPN app manually."
                         else:
                             return False, f"Connection failed: {status_msg}. Check ExpressVPN app or run as Administrator."
-            else:
                 # No connection message in output
-                error_msg = result.stderr or result.stdout or "Unknown error"
+                error_msg = stderr or stdout or "Unknown error"
                 return False, f"Connection failed: {error_msg[:100]}"
                 
         except subprocess.TimeoutExpired:
@@ -554,8 +609,10 @@ class ExpressVPNManager:
     
     async def connect_random_location(self) -> Tuple[bool, str]:
         """Connect to a random available location."""
+        self.log("🎲 [VPN] Selecting a random location...")
         locations = await self.list_locations()
         if not locations:
+            self.log("⚠️ [VPN] No locations found, trying smart location...")
             # Try smart location if list fails
             return await self.connect(None)
         
@@ -565,6 +622,7 @@ class ExpressVPNManager:
             available = locations
         
         location = random.choice(available)
+        self.log(f"📍 [VPN] Randomly selected: {location}")
         return await self.connect(location)
     
     async def rotate_location(self) -> Tuple[bool, str]:

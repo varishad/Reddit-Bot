@@ -7,8 +7,9 @@ import random as _random
 
 from playwright.sync_api import sync_playwright
 
-from config import HUMANIZE_INPUT, INTER_ACCOUNT_DELAY_MIN_S, INTER_ACCOUNT_DELAY_MAX_S
+from config import HUMANIZE_INPUT, INTER_ACCOUNT_DELAY_MIN_S, INTER_ACCOUNT_DELAY_MAX_S, REUSE_BROWSER_FOR_BATCH, VPN_ROTATE_AFTER_ACCOUNTS
 from ip_utils import get_ip_info
+from bot.browser.page_utils import get_or_create_page, close_extra_pages
 
 
 def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file_path: str) -> List[Dict]:
@@ -30,27 +31,23 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
             browser = None
             context = None
             page = None
-            try:
-                browser, context = engine._launch_browser_and_context(playwright)
-                page = context.new_page()
-                try:
-                    pages = getattr(context, "pages", [])
-                    for p in pages:
-                        if p != page:
-                            try:
-                                p.close()
-                            except:
-                                pass
-                except:
-                    pass
-            except Exception as e:
-                engine.log(f"Browser launch error: {str(e)}")
-                return []
 
             for i, (email, password) in enumerate(credentials, 1):
                 if engine.should_stop:
                     engine.log("Bot stopped by user")
                     break
+
+                # Launch browser if needed
+                if context is None:
+                    try:
+                        browser, context = engine._launch_browser_and_context_sync(playwright)
+                        page = get_or_create_page(context)
+                        close_extra_pages(context, keep_first=True)
+                    except Exception as e:
+                        engine.log(f"Browser launch error: {str(e)}")
+                        if i == 1: # If first attempt fails, return
+                            return results
+                        continue
 
                 engine.log(f"[{i}/{len(credentials)}] Processing: {email}")
                 if engine.vpn_manager and engine.current_vpn_location:
@@ -68,16 +65,11 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
 
                 if result.get("status") == "error" and result.get("error_message", "").lower().startswith("unable to determine"):
                     engine.log(f"🔄 Retrying {email} with fresh browser due to unclear error...")
-                    engine._close_context_browser(browser, context)
+                    engine._close_context_browser_sync(browser, context)
                     try:
-                        browser, context = engine._launch_browser_and_context(playwright)
-                        pages = getattr(context, "pages", [])
-                        page = pages[0] if pages else context.new_page()
-                        for p in pages[1:]:
-                            try:
-                                p.close()
-                            except:
-                                pass
+                        browser, context = engine._launch_browser_and_context_sync(playwright)
+                        page = get_or_create_page(context)
+                        close_extra_pages(context, keep_first=True)
                         retry_result = engine.login_to_reddit(
                             email,
                             password,
@@ -152,7 +144,7 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                         if retry_attempt > 1 and engine.vpn_manager:
                             engine.log(f"🌐 Changing VPN for retry attempt {retry_attempt}...")
                             try:
-                                engine._close_context_browser(browser, context)
+                                engine._close_context_browser_sync(browser, context)
                                 engine._run_async(engine.vpn_manager.disconnect())
                                 time.sleep(0.5)
                                 from config import (
@@ -180,17 +172,12 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                                     engine.log(f"✅ Connected to VPN: {vpn_location} for retry")
                                     time.sleep(2)
 
-                        engine._close_context_browser(browser, context)
+                        engine._close_context_browser_sync(browser, context)
 
                         try:
-                            browser, context = engine._launch_browser_and_context(playwright)
-                            pages = getattr(context, "pages", [])
-                            page = pages[0] if pages else context.new_page()
-                            for p in pages[1:]:
-                                try:
-                                    p.close()
-                                except:
-                                    pass
+                            browser, context = engine._launch_browser_and_context_sync(playwright)
+                            page = get_or_create_page(context)
+                            close_extra_pages(context, keep_first=True)
 
                             if engine.should_stop:
                                 break
@@ -239,6 +226,7 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                     or is_rate_limit
                     or (is_something_wrong and engine.consecutive_failures >= 3)
                     or (engine.consecutive_failures >= engine.max_failures_before_vpn_change)
+                    or (VPN_ROTATE_AFTER_ACCOUNTS > 0 and i % VPN_ROTATE_AFTER_ACCOUNTS == 0)
                 ) and status != "invalid" and not engine.should_stop
 
                 if should_change_vpn and engine.vpn_manager:
@@ -246,7 +234,7 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                     engine.last_vpn_reason = reason
                     engine.vpn_rotations += 1
                     engine.log(f"🔄 Changing VPN ({reason}). Rotations: {engine.vpn_rotations}")
-                    engine._close_context_browser(browser, context)
+                    engine._close_context_browser_sync(browser, context)
                     engine.log("🚫 Disconnecting current ExpressVPN connection...")
                     engine._run_async(engine.vpn_manager.disconnect())
                     time.sleep(0.5)
@@ -279,16 +267,13 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                             engine.log("⏳ Please wait for server location to stabilize...")
                             time.sleep(2)
                             engine.consecutive_failures = 0
-                            engine._close_context_browser(browser, context)
+                            engine._close_context_browser_sync(browser, context)
                             try:
-                                browser, context = engine._launch_browser_and_context(playwright)
-                                pages = getattr(context, "pages", [])
-                                page = pages[0] if pages else context.new_page()
-                                for p in pages[1:]:
-                                    try:
-                                        p.close()
-                                    except:
-                                        pass
+                                browser, context = engine._launch_browser_and_context_sync(playwright)
+                                page = get_or_create_page(context)
+                                close_extra_pages(context, keep_first=True)
+                            except Exception as relaunch_err:
+                                engine.log(f"Browser relaunch error: {str(relaunch_err)}")
                                 if engine.progress_callback:
                                     try:
                                         engine.progress_callback(
@@ -297,17 +282,15 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                                                 "last_vpn_reason": engine.last_vpn_reason,
                                             }
                                         )
-                                    except:
+                                    except Exception:
                                         pass
-                            except Exception as e:
-                                engine.log(f"Browser relaunch error: {str(e)}")
                                 return results
 
                 if (is_locked_reset or is_blocked or is_rate_limit or status in ["banned", "error"]) and status != "invalid" and not engine.should_stop:
                     try:
                         engine.log("🔁 Restarting browser due to session-risk issue...")
-                        engine._close_context_browser(browser, context)
-                        browser, context = engine._launch_browser_and_context(playwright)
+                        engine._close_context_browser_sync(browser, context)
+                        browser, context = engine._launch_browser_and_context_sync(playwright)
                         try:
                             pages = getattr(context, "pages", [])
                             page = pages[0] if pages else context.new_page()
@@ -363,12 +346,18 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                 if FILE_PRUNING_ENABLED and result["status"].lower() in [s.lower() for s in FILE_PRUNING_REMOVE_ON]:
                     engine._prune_credentials_entry(file_path, email, password)
 
-                if i < len(credentials) and not engine.should_stop and HUMANIZE_INPUT:
-                    try:
-                        delay = _random.uniform(INTER_ACCOUNT_DELAY_MIN_S, INTER_ACCOUNT_DELAY_MAX_S)
-                        time.sleep(delay)
-                    except Exception:
-                        pass
+                if i < len(credentials) and not engine.should_stop:
+                    if not REUSE_BROWSER_FOR_BATCH:
+                        engine.log("🔁 Closing browser to prepare for a fresh instance...")
+                        engine._close_context_browser_sync(browser, context)
+                        browser, context, page = None, None, None
+                    
+                    if HUMANIZE_INPUT:
+                        try:
+                            delay = _random.uniform(INTER_ACCOUNT_DELAY_MIN_S, INTER_ACCOUNT_DELAY_MAX_S)
+                            time.sleep(delay)
+                        except Exception:
+                            pass
 
                 try:
                     err_lower = (result.get("error_message", "") or "").lower()
@@ -376,11 +365,11 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                     is_lock_reset = ('reset' in err_lower and 'password' in err_lower) or ('locked' in err_lower) or ('unusual activity' in err_lower)
                     if is_lock_reset and current_status != "invalid" and not engine.should_stop:
                         engine.log("🔁 Detected account lock/reset banner. Restarting browser for a clean state...")
-                        engine._close_context_browser(browser, context)
+                        engine._close_context_browser_sync(browser, context)
                         try:
                             if engine.should_stop:
                                 return results
-                            browser, context = engine._launch_browser_and_context(playwright)
+                            browser, context = engine._launch_browser_and_context_sync(playwright)
                             page = context.new_page()
                             try:
                                 pages = getattr(context, "pages", [])

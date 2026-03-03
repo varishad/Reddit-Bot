@@ -144,18 +144,70 @@ def wait_for_http(url: str, timeout: int = 20) -> bool:
     return False
 
 
+def kill_port_owner(port: int):
+    """Force kill any process holding the specified port. Cross-platform."""
+    try:
+        if os.name == 'nt':  # Windows
+            # Get PIDs holding the port using netstat
+            cmd = f'netstat -ano | findstr :{port}'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            lines = result.stdout.strip().split("\n")
+            pids = set()
+            for line in lines:
+                parts = line.split()
+                if len(parts) > 4:
+                    pids.add(parts[-1])
+            
+            if pids:
+                print(f"  ⚠️  Cleaning up orphan process on port {port} (PIDs: {', '.join(pids)})...", flush=True)
+                for pid in pids:
+                    try:
+                        subprocess.run(["taskkill", "/F", "/PID", pid], check=False, creationflags=subprocess.CREATE_NO_WINDOW)
+                    except:
+                        pass
+        else:  # macOS/Linux
+            # Get PIDs holding the port using lsof
+            try:
+                result = subprocess.check_output(["lsof", "-ti", f":{port}"], text=True)
+                pids = result.strip().split("\n")
+                if pids and pids[0]:
+                    print(f"  ⚠️  Cleaning up orphan process on port {port} (PIDs: {', '.join(pids)})...", flush=True)
+                    for pid in pids:
+                        try:
+                            subprocess.run(["kill", "-9", pid], check=False)
+                        except:
+                            pass
+            except subprocess.CalledProcessError:
+                pass # lsof returns exit code 1 if no process found
+    except Exception as e:
+        print(f"  ⚠️  Note: Could not auto-clear port {port}: {e}", flush=True)
+
+
 # ── Process starters ──────────────────────────────────────────────────────
 
 def start_backend():
     if is_port_open(8000):
         print("  ✅ Backend already running", flush=True)
         return None
-    print("  → Starting API backend…", flush=True)
+    
+    print("  → Starting API backend\u2026", flush=True)
+    
+    # Ensure logs directory exists
+    logs_dir = os.path.join(ROOT, "logs")
+    if not os.path.exists(logs_dir):
+        os.makedirs(logs_dir)
+        
+    stdout_log = open(os.path.join(logs_dir, "backend_stdout.log"), "a")
+    stderr_log = open(os.path.join(logs_dir, "backend_stderr.log"), "a")
+    
+    stdout_log.write(f"\n--- Starting Backend at {time.ctime()} ---\n")
+    stderr_log.write(f"\n--- Starting Backend at {time.ctime()} ---\n")
+    
     return subprocess.Popen(
         [sys.executable, "server.py"],
         cwd=ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=stdout_log,
+        stderr=stderr_log,
     )
 
 
@@ -163,22 +215,36 @@ def start_frontend():
     if is_port_open(3000):
         print("  ✅ Frontend already running", flush=True)
         return None
-    print("  → Starting frontend (production)…", flush=True)
-    # ── KEY CHANGE: `next start` (production) instead of `next dev`
-    # Production mode starts in ~1-2s because the app is pre-compiled.
-    # Run `npm run build` once after any code changes.
+    
+    print("  → Starting frontend (production)\u2026", flush=True)
+    
+    # Ensure logs directory exists
+    logs_dir = os.path.join(ROOT, "logs")
+    if not os.path.exists(logs_dir):
+        os.makedirs(logs_dir)
+        
+    stdout_log = open(os.path.join(logs_dir, "frontend_stdout.log"), "a")
+    stderr_log = open(os.path.join(logs_dir, "frontend_stderr.log"), "a")
+    
+    stdout_log.write(f"\n--- Starting Frontend at {time.ctime()} ---\n")
+    stderr_log.write(f"\n--- Starting Frontend at {time.ctime()} ---\n")
+    
     return subprocess.Popen(
         ["npm", "run", "start"],
         cwd=FRONTEND_DIR,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=stdout_log,
+        stderr=stderr_log,
     )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
 
 def main():
-    print("\n🚀 Reddit Bot - Launching…\n", flush=True)
+    print("\n🚀 Reddit Bot - Launching\u2026\n", flush=True)
+
+    # Clean up stale processes
+    kill_port_owner(8000)
+    kill_port_owner(3000)
 
     backend_proc = start_backend()
     frontend_proc = start_frontend()

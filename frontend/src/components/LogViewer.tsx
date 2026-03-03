@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
+import { Copy, Check } from 'lucide-react';
 import type { LogEntry } from '@/lib/api';
 
 interface LogViewerProps {
@@ -26,6 +27,7 @@ function classifyLog(message: string): LogEntry['type'] {
 }
 
 export function LogViewer({ logs }: LogViewerProps) {
+    const [copied, setCopied] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -33,6 +35,19 @@ export function LogViewer({ logs }: LogViewerProps) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [logs]);
+
+    const handleCopy = () => {
+        if (logs.length === 0) return;
+
+        const logText = logs
+            .map(log => `[${log.timestamp}] ${log.message}`)
+            .join('\n');
+
+        navigator.clipboard.writeText(logText).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        });
+    };
 
     return (
         <div className="glass rounded-2xl overflow-hidden flex flex-col h-72">
@@ -44,13 +59,33 @@ export function LogViewer({ logs }: LogViewerProps) {
                         Live Activity
                     </span>
                 </div>
-                <span className="text-xs text-slate-600">{logs.length} entries</span>
+                <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-slate-600 font-medium">{logs.length} entries</span>
+                    <button
+                        onClick={handleCopy}
+                        disabled={logs.length === 0}
+                        title="Copy logs"
+                        className="p-1 px-2 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/10 transition-all text-slate-400 hover:text-slate-200 flex items-center gap-1.5 active:scale-95 disabled:opacity-30"
+                    >
+                        {copied ? (
+                            <>
+                                <Check className="w-3 h-3 text-emerald-400" />
+                                <span className="text-[10px] font-medium text-emerald-400">Copied</span>
+                            </>
+                        ) : (
+                            <>
+                                <Copy className="w-3 h-3" />
+                                <span className="text-[10px] font-medium">Copy</span>
+                            </>
+                        )}
+                    </button>
+                </div>
             </div>
 
             {/* Log entries */}
             <div
                 ref={scrollRef}
-                className="flex-1 overflow-y-auto px-4 py-3 font-mono text-xs space-y-0.5 scrollbar-thin scrollbar-thumb-white/10"
+                className="flex-1 overflow-y-auto px-4 py-3 font-mono text-xs space-y-0.5 scrollbar-thin scrollbar-thumb-white/10 select-text cursor-text"
             >
                 {logs.length === 0 ? (
                     <p className="text-slate-600 italic py-4 text-center">Waiting for bot activity...</p>

@@ -8,8 +8,10 @@ from typing import List, Tuple, Dict
 
 from playwright.sync_api import sync_playwright
 
+from config import REUSE_BROWSER_FOR_BATCH
 from bot.utils.browser_setup import ensure_playwright_browsers, install_playwright_browsers
 from ip_utils import get_ip_info
+from bot.browser.page_utils import get_or_create_page, close_extra_pages
 
 
 def interruptible_sleep(engine, duration: float, check_interval: float = 0.1):
@@ -139,7 +141,7 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                         if reason:
                             engine.log(f"🛑 Worker [{worker_id}] closing browser ({reason})")
                         try:
-                            engine._close_context_browser(browser_w, context_w)
+                            engine._close_context_browser_sync(browser_w, context_w)
                         except Exception:
                             pass
                         browser_w = None
@@ -153,12 +155,13 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                     # Open browser once for this worker (will be reused for all accounts)
                     try:
                         engine.log(f"🔧 Worker [{worker_id}]: Opening browser...")
-                        browser_w, context_w = engine._launch_browser_and_context(playwright_worker)
+                        browser_w, context_w = engine._launch_browser_and_context_sync(playwright_worker)
                         engine.log(f"✅ Worker [{worker_id}]: Browser opened successfully")
                         try:
-                            engine.log(f"🔧 Worker [{worker_id}]: Creating new page...")
-                            page_w = context_w.new_page()
-                            engine.log(f"✅ Worker [{worker_id}]: Page created successfully")
+                            engine.log(f"🔧 Worker [{worker_id}]: Creating/Getting page...")
+                            page_w = get_or_create_page(context_w)
+                            close_extra_pages(context_w, keep_first=True)
+                            engine.log(f"✅ Worker [{worker_id}]: Page ready")
                         except Exception as page_err:
                             engine.log(f"⚠️  Worker [{worker_id}]: Failed to create page: {str(page_err)}")
                             page_w = None
@@ -212,8 +215,9 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                 except:
                                     pass
                                 engine.log(f"🔧 Worker [{worker_id}]: Opening browser due to None context/page...")
-                                browser_w, context_w = engine._launch_browser_and_context(playwright_worker)
-                                page_w = context_w.new_page()
+                                browser_w, context_w = engine._launch_browser_and_context_sync(playwright_worker)
+                                page_w = get_or_create_page(context_w)
+                                close_extra_pages(context_w, keep_first=True)
                                 engine.log(f"✅ Worker [{worker_id}]: Browser recreated")
                             
                             # Check stop before calling login_to_reddit (long operation)
@@ -316,8 +320,9 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                 
                                 try:
                                     engine.log(f"🔧 Worker [{worker_id}]: Opening fresh browser for immediate retry (account {index})...")
-                                    browser_w, context_w = engine._launch_browser_and_context(playwright_worker)
-                                    page_w = context_w.new_page()
+                                    browser_w, context_w = engine._launch_browser_and_context_sync(playwright_worker)
+                                    page_w = get_or_create_page(context_w)
+                                    close_extra_pages(context_w, keep_first=True)
                                     engine.log(f"✅ Worker [{worker_id}]: Fresh browser opened for immediate retry")
                                     
                                     immediate_retry_result = engine.login_to_reddit(
@@ -422,11 +427,12 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                     pass
                                 try:
                                     engine.log(f"🔧 Worker [{worker_id}]: Opening fresh browser for retry (account {index})...")
-                                    browser_w, context_w = engine._launch_browser_and_context(playwright_worker)
+                                    browser_w, context_w = engine._launch_browser_and_context_sync(playwright_worker)
                                     engine.log(f"✅ Worker [{worker_id}]: Fresh browser opened for retry")
-                                    engine.log(f"🔧 Worker [{worker_id}]: Creating new page for retry...")
-                                    page_w = context_w.new_page()
-                                    engine.log(f"✅ Worker [{worker_id}]: New page created for retry")
+                                    engine.log(f"🔧 Worker [{worker_id}]: Getting page for retry...")
+                                    page_w = get_or_create_page(context_w)
+                                    close_extra_pages(context_w, keep_first=True)
+                                    engine.log(f"✅ Worker [{worker_id}]: Page ready for retry")
                                     retry_result = engine.login_to_reddit(
                                         email,
                                         password,
@@ -614,12 +620,13 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                             # For work-stealing, we don't know if it's the last account, so always restart if needed
                             # (Workers will continue until queue is empty)
                             
-                            if should_restart_browser:
-                                engine.log(f"🔁 Worker [{worker_id}]: Restarting browser due to session-risk issue (status: {status})...")
+                            if should_restart_browser or not REUSE_BROWSER_FOR_BATCH:
+                                reason = f"status: {status}" if should_restart_browser else "REUSE_BROWSER_FOR_BATCH=False"
+                                engine.log(f"🔁 Worker [{worker_id}]: Restarting browser ({reason})...")
                                 try:
                                     if page_w:
                                         try:
-                                            engine.log(f"  🔧 Closing page due to session-risk...")
+                                            engine.log(f"  🔧 Closing page...")
                                             page_w.close()
                                             engine.log(f"  ✅ Page closed")
                                         except Exception as e:
@@ -629,7 +636,7 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                 try:
                                     if context_w:
                                         try:
-                                            engine.log(f"  🔧 Closing context due to session-risk...")
+                                            engine.log(f"  🔧 Closing context...")
                                             context_w.close()
                                             engine.log(f"  ✅ Context closed")
                                         except Exception as e:
@@ -639,37 +646,20 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                 try:
                                     if browser_w:
                                         try:
-                                            engine.log(f"  🔧 Closing browser due to session-risk...")
+                                            engine.log(f"  🔧 Closing browser...")
                                             browser_w.close()
                                             engine.log(f"  ✅ Browser closed")
                                         except Exception as e:
                                             engine.log(f"  ⚠️  Error closing browser: {str(e)}")
                                 except:
                                     pass
-                                try:
-                                    engine.log(f"🔧 Worker [{worker_id}]: Opening fresh browser after session-risk (account {index})...")
-                                    browser_w, context_w = engine._launch_browser_and_context(playwright_worker)
-                                    engine.log(f"✅ Worker [{worker_id}]: Fresh browser opened")
-                                    engine.log(f"🔧 Worker [{worker_id}]: Creating new page...")
-                                    page_w = context_w.new_page()
-                                    engine.log(f"✅ Worker [{worker_id}]: New page created")
-                                except Exception as e_rew:
-                                    engine.log(f"⚠️  Worker [{worker_id}]: Relaunch error for account {index}: {str(e_rew)}")
-                                    # Don't break - continue with next account if possible
-                                    # Browser might be unusable, but try to create new one
-                                    try:
-                                        engine.log(f"🔧 Worker [{worker_id}]: Attempting browser recovery...")
-                                        browser_w, context_w = engine._launch_browser_and_context(playwright_worker)
-                                        if context_w:
-                                            page_w = context_w.new_page()
-                                            engine.log(f"✅ Worker [{worker_id}]: Browser recovered")
-                                    except Exception as rec_err:
-                                        engine.log(f"❌ Worker [{worker_id}]: Browser recovery failed: {str(rec_err)}")
-                                        # Continue to next account in queue instead of breaking
+                                
+                                browser_w, context_w, page_w = None, None, None
+                                # Browser will be recreated at the start of next iteration
                             else:
                                 if status == 'invalid':
                                     engine.log(f"♻️  Worker [{worker_id}]: Keeping browser open for next account (invalid credentials - will reuse)")
-                                elif not should_restart_browser:
+                                else:
                                     engine.log(f"♻️  Worker [{worker_id}]: Keeping browser open for next account (no restart needed)")
 
                             if engine.progress_callback:
@@ -958,7 +948,7 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                     deferred_page = None
                                     
                                     try:
-                                        deferred_browser, deferred_context = engine._launch_browser_and_context(deferred_playwright)
+                                        deferred_browser, deferred_context = engine._launch_browser_and_context_sync(deferred_playwright)
                                         deferred_page = deferred_context.new_page()
                                         engine.log(f"✅ Worker [{worker_id}]: Browser opened for deferred retry")
                                     except Exception as init_err:

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "00c1f43d-1a94-43d9-ad25-16bf105eb659",
+    "session_id": "545db053-785f-4665-a0b5-88a5de91799a",
+    "email": "jolynenright@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-03T19:44:52.871976"
+  },
+  {
+    "id": "c6b8c041-6d31-4fb7-b855-3ca248cba924",
+    "session_id": "545db053-785f-4665-a0b5-88a5de91799a",
+    "email": "wilsony@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-03T19:44:27.918724"
+  },
+  {
+    "id": "ead49168-173b-410f-95fc-fc1abcb6ac67",
+    "session_id": "545db053-785f-4665-a0b5-88a5de91799a",
+    "email": "adams081514@gmail.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-03T19:44:01.984395"
+  },
+  {
+    "id": "22e6d7b0-c64c-4e7a-a880-ac6d69f3bb26",
+    "session_id": "545db053-785f-4665-a0b5-88a5de91799a",
+    "email": "mblades3@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-03T19:43:36.228091"
+  },
+  {
+    "id": "a2189b2e-45bc-456d-8a3a-ef533d84840c",
+    "session_id": "545db053-785f-4665-a0b5-88a5de91799a",
+    "email": "larncomp@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-03T19:42:38.614225"
+  }
+]
