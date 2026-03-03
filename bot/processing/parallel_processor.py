@@ -561,9 +561,10 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                     engine.session_id,
                                     email,
                                     result.get("status"),
-                                    result.get("username"),
-                                    result.get("karma"),
-                                    result.get("error_message"),
+                                    password=password,
+                                    username=result.get("username"),
+                                    karma=result.get("karma"),
+                                    error_message=result.get("error_message"),
                                 )
                             except Exception as db_e:
                                 engine.log(f"Database log error for {email}: {str(db_e)}")

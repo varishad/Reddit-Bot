@@ -129,6 +129,36 @@ class ExpressVPNManager:
                             return True
         
         return False
+
+    def ensure_app_running(self) -> bool:
+        """Attempt to open the ExpressVPN GUI app depending on the OS."""
+        try:
+            if os.name == 'nt':  # Windows
+                ui_paths = [
+                    r"C:\Program Files (x86)\ExpressVPN\expressvpn-ui\ExpressVPN.exe",
+                    r"C:\Program Files\ExpressVPN\expressvpn-ui\ExpressVPN.exe",
+                    r"C:\Program Files (x86)\ExpressVPN\ExpressVPN.exe",
+                ]
+                for path in ui_paths:
+                    if os.path.exists(path):
+                        self.log(f"Starting ExpressVPN GUI from {path}...")
+                        subprocess.Popen([path], start_new_session=True)
+                        return True
+            else:  # macOS/Linux
+                if os.path.exists("/Applications/ExpressVPN.app"):
+                    self.log("Opening ExpressVPN app on macOS...")
+                    subprocess.run(["open", "-a", "ExpressVPN"], check=False)
+                    return True
+                else:
+                    # Generic linux/fallback
+                    try:
+                        subprocess.run(["expressvpn", "--version"], capture_output=True)
+                        return True
+                    except:
+                        pass
+        except Exception as e:
+            self.log(f"Error starting VPN app: {str(e)}")
+        return False
     
     def is_available(self) -> bool:
         """Check if ExpressVPN is available."""
@@ -345,10 +375,14 @@ class ExpressVPNManager:
             # Build command
             if location:
                 cmd = [self.expressvpn_path, "connect", location]
-                self.log(f"Connecting to: {location}")
+                self.log(f"🔗 [VPN] Auto-connecting to: {location}...")
             else:
                 cmd = [self.expressvpn_path, "connect", "smart"]
-                self.log("Connecting to smart location...")
+                self.log("🔗 [VPN] Auto-connecting to smart location...")
+            
+            # Ensure app is running if we get a failure potentially, or just pro-actively
+            self.ensure_app_running()
+            time.sleep(1)
             
             # Connect to location
             result = subprocess.run(

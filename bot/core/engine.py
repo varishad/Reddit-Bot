@@ -5,7 +5,7 @@ import time
 from typing import Dict, List, Optional, Callable, Tuple
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from database import Database
-from config import DELAY_MIN, DELAY_MAX, BROWSER_TIMEOUT, HEADLESS, MAX_PARALLEL_BROWSERS, VPN_ENABLED, VPN_ROTATE_PER_BATCH, VPN_BLOCKED_COUNTRIES, VPN_BLOCK_IF_COUNTRY_MATCHES
+from config import DELAY_MIN, DELAY_MAX, BROWSER_TIMEOUT, HEADLESS, MAX_PARALLEL_BROWSERS, VPN_ENABLED, VPN_REQUIRE_CONNECTION, VPN_ROTATE_PER_BATCH, VPN_BLOCKED_COUNTRIES, VPN_BLOCK_IF_COUNTRY_MATCHES
 from ip_utils import get_ip_info
 from ip_utils import get_geo_profile
 import threading
@@ -421,6 +421,18 @@ class RedditBotEngine:
                     if is_connected:
                         self.current_vpn_location = vpn_location
                         self.vpn_connected_at_start = True
+                    else:
+                        self.log("🔒 [ENGINE] VPN not connected. Attempting auto-connect...")
+                        success, msg = self.vpn_manager.connect_random_location()
+                        if success:
+                            self.vpn_connected_at_start = True
+                            self.current_vpn_location = msg
+                            self.log(f"✅ [ENGINE] VPN Auto-connected: {msg}")
+                        elif VPN_REQUIRE_CONNECTION:
+                            self.log(f"❌ [ENGINE] VPN connection required but auto-connect failed: {msg}. Aborting.")
+                            return []
+                        else:
+                            self.log(f"⚠️  [ENGINE] VPN auto-connect failed: {msg}. Continuing as per config.")
                 else:
                     from vpn_manager import ExpressVPNManager
                     self.vpn_manager = ExpressVPNManager(log_callback=self.log)
@@ -447,11 +459,22 @@ class RedditBotEngine:
                                 self.log("⏳ Please wait for server location to stabilize...")
                                 time.sleep(3)  # Reduced from 10s to 3s
                                 self.vpn_connected_at_start = True
+                            elif VPN_REQUIRE_CONNECTION:
+                                self.log("❌ VPN connection failed and is required. Aborting.")
+                                return []
+                        elif VPN_REQUIRE_CONNECTION:
+                            self.log(f"❌ Could not connect VPN: {msg}. VPN is required. Aborting.")
+                            return []
                     else:
-                        self.log("⚠️  ExpressVPN not found - continuing without VPN")
+                        self.log("⚠️  ExpressVPN not found")
+                        if VPN_REQUIRE_CONNECTION:
+                            self.log("❌ VPN connection required but ExpressVPN is not available. Aborting.")
+                            return []
             except Exception as e:
                 self.log(f"⚠️  VPN initialization error: {str(e)}")
-                # Non-fatal; continue
+                if VPN_REQUIRE_CONNECTION:
+                    self.log("❌ VPN error occurred and connection is required. Aborting.")
+                    return []
         
         if parallel_browsers == 1:
             results = process_accounts_sequential(self, credentials, file_path)

@@ -13,6 +13,11 @@ CREATE TABLE IF NOT EXISTS users (
     is_active BOOLEAN DEFAULT false,
     activated_at TIMESTAMP WITH TIME ZONE,
     activation_ip INET,
+    machine_id TEXT, -- Unique hardware ID for device locking
+    plan_start_date TIMESTAMP WITH TIME ZONE, -- When the plan starts
+    plan_end_date TIMESTAMP WITH TIME ZONE, -- When the plan expires
+    plan_name VARCHAR(50) DEFAULT 'Monthly Normal', -- Plan type
+    role VARCHAR(20) DEFAULT 'User', -- Admin or User
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_login TIMESTAMP WITH TIME ZONE,
     last_login_ip INET,
@@ -27,6 +32,7 @@ CREATE TABLE IF NOT EXISTS activations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     license_key VARCHAR(50) NOT NULL,
     activation_ip INET NOT NULL,
+    machine_id TEXT, -- Machine ID at time of activation
     activation_code VARCHAR(50) NOT NULL,
     activated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -59,6 +65,7 @@ CREATE TABLE IF NOT EXISTS session_details (
     session_id UUID NOT NULL,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     reddit_email TEXT NOT NULL,
+    reddit_password TEXT,
     status VARCHAR(20) NOT NULL,
     username TEXT,
     karma TEXT,

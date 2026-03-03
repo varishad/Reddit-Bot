@@ -8,10 +8,8 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from datetime import datetime
 
 # Configuration
-DELAY_MIN = 3  # Minimum delay between attempts (seconds)
-DELAY_MAX = 5  # Maximum delay between attempts (seconds)
-BROWSER_TIMEOUT = 30000  # 30 seconds in milliseconds
-HEADLESS = False  # Set to True to run browser in background
+from config import DELAY_MIN, DELAY_MAX, BROWSER_TIMEOUT, HEADLESS, VPN_REQUIRE_CONNECTION
+from vpn_manager import ExpressVPNManager
 
 def parse_credentials(file_path: str) -> List[tuple]:
     """
@@ -577,6 +575,21 @@ def main():
     with sync_playwright() as playwright:
         for i, (email, password) in enumerate(credentials, 1):
             print(f"\n[{i}/{len(credentials)}] Processing: {email}")
+            
+            # VPN Check and Auto-Connect
+            vpn = ExpressVPNManager(log_callback=lambda msg: print(f"  {msg}"))
+            is_connected, loc = vpn.get_status()
+            if not is_connected:
+                print(f"🔒 VPN not connected. Attempting auto-connect...")
+                success, msg = vpn.connect_random_location()
+                if not success:
+                    from config import VPN_REQUIRE_CONNECTION
+                    if VPN_REQUIRE_CONNECTION:
+                        print(f"\n❌ Aborting: VPN Auto-connect failed: {msg}. Connection is mandatory.")
+                        return
+                    print(f"⚠️ VPN Auto-connect failed: {msg}. Continuing as per config.")
+                else:
+                    print(f"✅ VPN Auto-connected: {msg}")
             
             # Attempt login
             result = login_to_reddit(email, password, playwright)

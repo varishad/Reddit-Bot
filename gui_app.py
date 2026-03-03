@@ -1585,9 +1585,15 @@ Location: {values[8]}"""
                     self.log(f"VPN auto-connect error: {str(e)}")
                 self.update_vpn_status()
                 if not self.vpn_connected:
-                    messagebox.showwarning("VPN", "Could not connect VPN automatically. Please ensure ExpressVPN is logged in.")
-                    self.start_btn.config(state=tk.NORMAL, text="▶️  Start Bot", bg="#10b981")
-                    return
+                    from config import VPN_REQUIRE_CONNECTION
+                    if VPN_REQUIRE_CONNECTION:
+                        messagebox.showerror("VPN Required", "VPN connection is mandatory to start the bot. Please connect ExpressVPN and try again.")
+                        self.start_btn.config(state=tk.NORMAL, text="▶️  Start Bot", bg="#10b981")
+                        return
+                    else:
+                        messagebox.showwarning("VPN", "Could not connect VPN automatically. Please ensure ExpressVPN is logged in.")
+                        # If not mandatory, we might still want to proceed based on old logic, 
+                        # but the plan is to enforce it when required.
             
             file_path = self.file_path_var.get()
             if not os.path.exists(file_path):
