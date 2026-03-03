@@ -153,7 +153,7 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                             engine.log(f"🌐 Changing VPN for retry attempt {retry_attempt}...")
                             try:
                                 engine._close_context_browser(browser, context)
-                                engine.vpn_manager.disconnect()
+                                engine._run_async(engine.vpn_manager.disconnect())
                                 time.sleep(0.5)
                                 from config import (
                                     VPN_PREFERRED_COUNTRIES,
@@ -166,15 +166,15 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                                 VPN_LOCATION_COOLDOWN_SECONDS = 900
                                 VPN_LOCATION_MAX_TRIES_PER_ROTATION = 10
 
-                            success, msg = engine.vpn_manager.connect_with_strategy(
+                            success, msg = engine._run_async(engine.vpn_manager.connect_with_strategy(
                                 preferred=VPN_PREFERRED_COUNTRIES,
                                 avoid=VPN_AVOID_COUNTRIES,
                                 cooldown_seconds=int(VPN_LOCATION_COOLDOWN_SECONDS),
                                 max_candidates=int(VPN_LOCATION_MAX_TRIES_PER_ROTATION),
-                            )
+                            ))
                             if success:
                                 time.sleep(2)
-                                is_connected, vpn_location = engine.vpn_manager.get_status()
+                                is_connected, vpn_location = engine._run_async(engine.vpn_manager.get_status())
                                 if is_connected:
                                     engine.current_vpn_location = vpn_location
                                     engine.log(f"✅ Connected to VPN: {vpn_location} for retry")
@@ -248,7 +248,7 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                     engine.log(f"🔄 Changing VPN ({reason}). Rotations: {engine.vpn_rotations}")
                     engine._close_context_browser(browser, context)
                     engine.log("🚫 Disconnecting current ExpressVPN connection...")
-                    engine.vpn_manager.disconnect()
+                    engine._run_async(engine.vpn_manager.disconnect())
                     time.sleep(0.5)
                     engine.log("✅ Disconnected ExpressVPN")
 
@@ -264,15 +264,15 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                         VPN_PREFERRED_COUNTRIES, VPN_AVOID_COUNTRIES = [], []
                         VPN_LOCATION_COOLDOWN_SECONDS = 900
                         VPN_LOCATION_MAX_TRIES_PER_ROTATION = 10
-                    success, msg = engine.vpn_manager.connect_with_strategy(
+                    success, msg = engine._run_async(engine.vpn_manager.connect_with_strategy(
                         preferred=VPN_PREFERRED_COUNTRIES,
                         avoid=VPN_AVOID_COUNTRIES,
                         cooldown_seconds=int(VPN_LOCATION_COOLDOWN_SECONDS),
                         max_candidates=int(VPN_LOCATION_MAX_TRIES_PER_ROTATION),
-                    )
+                    ))
                     if success:
                         time.sleep(2)
-                        is_connected, vpn_location = engine.vpn_manager.get_status()
+                        is_connected, vpn_location = engine._run_async(engine.vpn_manager.get_status())
                         if is_connected:
                             engine.current_vpn_location = vpn_location
                             engine.log(f"✅ Connected to new server: {vpn_location}")
@@ -404,7 +404,7 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
         engine.should_stop = True
         if engine.vpn_manager:
             try:
-                engine.vpn_manager.disconnect()
+                engine._run_async(engine.vpn_manager.disconnect())
             except:
                 pass
         return results
@@ -412,7 +412,7 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
         engine.log(f"⚠️  Unexpected error in processing: {str(e)}")
         if engine.vpn_manager:
             try:
-                engine.vpn_manager.disconnect()
+                engine._run_async(engine.vpn_manager.disconnect())
             except:
                 pass
         return results

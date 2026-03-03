@@ -1,7 +1,13 @@
 """
-Reddit Bot - Native App Launcher
-Opens the Next.js web UI in a native macOS WebKit window using pywebview.
-Starts the FastAPI backend and Next.js dev server as background processes.
+Reddit Bot - Native App Launcher (Production Mode)
+─────────────────────────────────────────────────
+Uses `next start` (production) instead of `next dev`.
+Production mode starts in ~1-2s vs 20-60s for dev mode.
+
+Strategy for near-instant open (like ExpressVPN):
+ 1. If servers are already running → open window immediately (< 1s)
+ 2. If cold start → open window with splash screen immediately,
+    background-load the real app once services are ready.
 """
 import subprocess
 import sys
@@ -9,13 +15,107 @@ import time
 import os
 import threading
 import socket
+import urllib.request
 import webview
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIR = os.path.join(ROOT, "frontend")
 
+# ── Inline splash page shown while services start ──────────────────────────
+SPLASH_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1424;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100vh; font-family: -apple-system, 'Inter', sans-serif;
+    color: #fff;
+  }
+  .logo {
+    width: 52px; height: 52px; border-radius: 16px;
+    background: #ff5a5f;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 20px;
+    box-shadow: 0 0 40px rgba(255,90,95,0.35);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .logo svg { width: 26px; height: 26px; fill: white; }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+  p  { font-size: 12px; color: #4b5563; margin-top: 8px; }
+  .dots { display: flex; gap: 6px; margin-top: 28px; }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #ff5a5f; opacity: 0.3;
+    animation: blink 1.2s ease-in-out infinite;
+  }
+  .dot:nth-child(2) { animation-delay: 0.2s; }
+  .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink {
+    0%, 80%, 100% { opacity: 0.2; }
+    40%           { opacity: 1;   }
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 30px rgba(255,90,95,0.3); }
+    50%       { box-shadow: 0 0 55px rgba(255,90,95,0.5); }
+  }
+</style>
+</head>
+<body>
+  <div class="logo">
+    <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+  </div>
+  <h1>Reddit Bot</h1>
+  <p id="status">Starting services\u2026</p>
+  <div class="dots">
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+
+  <script>
+    // Self-contained polling — no Python threads needed.
+    // fetch() with no-cors succeeds as long as the server accepts the connection,
+    // regardless of CORS headers or response body. Perfect for readiness probing.
+    const BACKEND  = 'http://localhost:8000/health';
+    const FRONTEND = 'http://localhost:3000';
+    const status   = document.getElementById('status');
+
+    async function probe(url) {
+      try { await fetch(url, { mode: 'no-cors', cache: 'no-store' }); return true; }
+      catch { return false; }
+    }
+
+    async function waitAndRedirect() {
+      let backendOk = false, frontendOk = false;
+      while (true) {
+        if (!backendOk)  backendOk  = await probe(BACKEND);
+        if (!frontendOk) frontendOk = await probe(FRONTEND);
+
+        if (backendOk && frontendOk) {
+          status.textContent = 'Ready \u2014 opening\u2026';
+          await new Promise(r => setTimeout(r, 300));
+          window.location.href = FRONTEND;
+          return;
+        }
+
+        status.textContent = !backendOk ? 'Starting API\u2026' : 'Starting frontend\u2026';
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
+    waitAndRedirect();
+  </script>
+</body>
+</html>"""
+
+
+# ── Port helpers ──────────────────────────────────────────────────────────
 
 def is_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:
-    """Check if a port is accepting connections."""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -23,87 +123,89 @@ def is_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bo
         return False
 
 
-def wait_for_port(port: int, label: str, timeout: int = 30):
-    """Block until the given port is accepting connections or timeout."""
-    print(f"  ⏳ Waiting for {label} (port {port})...", flush=True)
+def wait_for_port(port: int, label: str, timeout: int = 30) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         if is_port_open(port):
-            print(f"  ✅ {label} is ready", flush=True)
             return True
-        time.sleep(0.3)
+        time.sleep(0.25)
     print(f"  ⚠️  Timeout waiting for {label}", flush=True)
     return False
 
 
+def wait_for_http(url: str, timeout: int = 20) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1.5):
+                return True
+        except Exception:
+            time.sleep(0.3)
+    return False
+
+
+# ── Process starters ──────────────────────────────────────────────────────
+
 def start_backend():
-    """Start the FastAPI backend server."""
     if is_port_open(8000):
-        print("  ✅ Backend already running on port 8000", flush=True)
+        print("  ✅ Backend already running", flush=True)
         return None
-    print("  → Starting Python API backend...", flush=True)
-    proc = subprocess.Popen(
+    print("  → Starting API backend…", flush=True)
+    return subprocess.Popen(
         [sys.executable, "server.py"],
         cwd=ROOT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    return proc
 
 
 def start_frontend():
-    """Start the Next.js frontend dev server."""
     if is_port_open(3000):
-        print("  ✅ Frontend already running on port 3000", flush=True)
+        print("  ✅ Frontend already running", flush=True)
         return None
-    print("  → Starting Next.js frontend...", flush=True)
-    frontend_dir = os.path.join(ROOT, "frontend")
-    proc = subprocess.Popen(
-        ["npm", "run", "dev"],
-        cwd=frontend_dir,
+    print("  → Starting frontend (production)…", flush=True)
+    # ── KEY CHANGE: `next start` (production) instead of `next dev`
+    # Production mode starts in ~1-2s because the app is pre-compiled.
+    # Run `npm run build` once after any code changes.
+    return subprocess.Popen(
+        ["npm", "run", "start"],
+        cwd=FRONTEND_DIR,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    return proc
 
+
+# ── Main ──────────────────────────────────────────────────────────────────
 
 def main():
-    print("\n🚀 Reddit Bot - Launching Native App...\n", flush=True)
+    print("\n🚀 Reddit Bot - Launching…\n", flush=True)
 
-    # Start both servers
     backend_proc = start_backend()
     frontend_proc = start_frontend()
 
-    # Wait for both to be ready
-    wait_for_port(8000, "API Backend")
-    wait_for_port(3000, "Frontend", timeout=60)
-
-    print("\n  ✅ All services ready — opening app window...\n", flush=True)
-
-    # Open native WebKit window (no browser bar, no tabs)
-    window = webview.create_window(
-        title="Reddit Bot",
-        url="http://localhost:3000",
-        width=1100,
-        height=720,
-        min_size=(800, 600),
-        resizable=True,
-        frameless=False,   # Keep OS title bar for native feel
-        easy_drag=False,
-        background_color="#0f172a",
-    )
-
     def on_closing():
-        """Kill child processes when the window is closed."""
-        print("\n  Shutting down...", flush=True)
         if backend_proc:
             backend_proc.terminate()
         if frontend_proc:
             frontend_proc.terminate()
 
-    window.events.closed += on_closing
+    # Always open with the self-redirecting splash.
+    # The JavaScript inside polls /health + port 3000 every 500ms and
+    # navigates to http://localhost:3000 the moment both respond.
+    # No threading, no Python-side navigation — clean and reliable.
+    window = webview.create_window(
+        title="Reddit Bot",
+        html=SPLASH_HTML,          # inline HTML, no URL needed
+        width=1100,
+        height=720,
+        min_size=(800, 600),
+        resizable=True,
+        frameless=False,
+        easy_drag=False,
+        background_color="#0d1424",
+    )
 
-    # Start the native window (blocks until closed)
+    window.events.closed += on_closing
     webview.start(debug=False)
 
 

@@ -8,6 +8,7 @@ from database import Database
 from config import DELAY_MIN, DELAY_MAX, BROWSER_TIMEOUT, HEADLESS, MAX_PARALLEL_BROWSERS, VPN_ENABLED, VPN_REQUIRE_CONNECTION, VPN_ROTATE_PER_BATCH, VPN_BLOCKED_COUNTRIES, VPN_BLOCK_IF_COUNTRY_MATCHES
 from ip_utils import get_ip_info
 from ip_utils import get_geo_profile
+import asyncio
 import threading
 # Stealth/humanization config
 from config import (
@@ -95,8 +96,8 @@ class RedditBotEngine:
         for browser, context in contexts:
             try:
                 close_context_browser_util(browser, context)
-            except Exception:
-                pass
+            except Exception as e:
+                self.log(f"⚠️ Error closing browser context: {str(e)}")
     
     def log(self, message: str):
         """Log message using callback."""
@@ -119,10 +120,10 @@ class RedditBotEngine:
             for existing in pages:
                 try:
                     existing.close()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    self.log(f"⚠️ Error closing existing page: {str(e)}")
+        except Exception as e:
+            self.log(f"⚠️ Error during clean page creation prep: {str(e)}")
         return context.new_page()
     
     def parse_credentials(self, file_path: str) -> List[tuple]:
@@ -144,6 +145,22 @@ class RedditBotEngine:
         """
         return normalize_login_error_util(error_lower)
     
+    def _run_async(self, coro):
+        """Run an async coroutine in a synchronous context safely."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We are likely in a thread where we can't just run a new loop
+                # This is common in FastAPI background workers
+                import concurrent.futures
+                future = asyncio.run_coroutine_threadsafe(coro, loop)
+                return future.result()
+            else:
+                return loop.run_until_complete(coro)
+        except RuntimeError:
+            # No event loop in this thread
+            return asyncio.run(coro)
+
     def _launch_browser_and_context(self, playwright):
         """Launch a new browser and context using current configuration and geo profile."""
         browser, context = launch_browser_and_context_util(playwright, log_callback=self.log)
@@ -200,8 +217,8 @@ class RedditBotEngine:
             if STEALTH_ENABLED:
                 try:
                     apply_stealth_util(page, _stealth_apply)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.log(f"⚠️ Stealth apply skip: {str(e)}")
             
             login_url = "https://www.reddit.com/login/?dest=https%3A%2F%2Fwww.reddit.com%2Fuser%2Fme%2F&rdt=46144"
 
@@ -220,57 +237,57 @@ class RedditBotEngine:
                         self.log("🌐 Loading Reddit login page...")
                         try:
                             context.clear_cookies()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self.log(f"⚠️ Error clearing cookies: {str(e)}")
                         self._navigate_via_address_bar(page, login_url, BROWSER_TIMEOUT)
-                except Exception:
-                    self.log("🌐 Loading Reddit login page...")
+                except Exception as e:
+                    self.log(f"⚠️ Navigation error during page reuse: {str(e)}")
                     self._navigate_via_address_bar(page, login_url, BROWSER_TIMEOUT)
             else:
                 self.log("🌐 Loading Reddit login page...")
                 try:
                     context.clear_cookies()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.log(f"⚠️ Error clearing cookies: {str(e)}")
                 try:
                     context.clear_permissions()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.log(f"⚠️ Error clearing permissions: {str(e)}")
                 self._navigate_via_address_bar(page, login_url, BROWSER_TIMEOUT)
                 try:
                     page.evaluate("() => { try { localStorage.clear(); sessionStorage.clear(); } catch(e){} }")
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.log(f"⚠️ Error clearing localStorage: {str(e)}")
             # Ensure login form exists; if not, force logout then back to login page again
             try:
                 if not ensure_form_ready_util(page, timeout=4000):
                     try:
                         self._navigate_via_address_bar(page, 'https://www.reddit.com/logout', 8000)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.log(f"⚠️ Logout error: {str(e)}")
                     try:
                         self._navigate_via_address_bar(page, login_url, BROWSER_TIMEOUT)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as e:
+                        self.log(f"⚠️ Login navigation error: {str(e)}")
+            except Exception as e:
+                self.log(f"⚠️ Form readiness check error: {str(e)}")
             # Human-like small wait and mouse jitter before interacting
             if HUMANIZE_INPUT:
                 try:
                     human_pause_util()
                     mouse_jitter_util(page)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.log(f"⚠️ Humanization pause error: {str(e)}")
             try:
                 page.wait_for_load_state('domcontentloaded', timeout=5000)
-            except:
-                pass
+            except Exception as e:
+                self.log(f"⚠️ Load state pause error: {str(e)}")
             time.sleep(0.5)  # Reduced to 0.5s for faster processing
             
             try:
                 page.wait_for_selector('input[type="text"], input[name="username"], input[id*="username"]', timeout=5000)
-            except:
-                pass
+            except Exception as e:
+                self.log(f"⚠️ Input selector timeout: {str(e)}")
             
             # Fill email - using Reddit's new UI (faceplate-text-input) for faster detection
             email_field = fill_username_field_util(page, email, log_callback=self.log)
@@ -294,14 +311,14 @@ class RedditBotEngine:
             # Wait for navigation - minimal wait with small human-like scroll
             try:
                 page.wait_for_load_state('domcontentloaded', timeout=8000)
-            except:
-                pass
+            except Exception as e:
+                self.log(f"⚠️ Post-submit load state timeout: {str(e)}")
             if HUMANIZE_INPUT:
                 try:
                     human_pause_util()
                     gentle_scroll_util(page)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.log(f"⚠️ Post-submit humanization error: {str(e)}")
             time.sleep(0.5)  # Reduced to 0.5s for faster detection
             
             # Detect status
@@ -354,8 +371,8 @@ class RedditBotEngine:
                             msg = result.get("error_message") or "Account locked due to unusual activity"
                             result["error_message"] = f"{msg} | " + " | ".join(extra_bits)
                             self.log(f"✅ Collected info: username={result.get('username')}, karma={result.get('karma')}")
-            except Exception:
-                pass
+            except Exception as e:
+                self.log(f"⚠️ Final status processing error: {str(e)}")
             
         except PlaywrightTimeoutError:
             result["error_message"] = "Timeout waiting for page to load"
@@ -417,13 +434,13 @@ class RedditBotEngine:
             try:
                 if self.vpn_manager:
                     # Use existing VPN managed by GUI
-                    is_connected, vpn_location = self.vpn_manager.get_status()
+                    is_connected, vpn_location = self._run_async(self.vpn_manager.get_status())
                     if is_connected:
                         self.current_vpn_location = vpn_location
                         self.vpn_connected_at_start = True
                     else:
                         self.log("🔒 [ENGINE] VPN not connected. Attempting auto-connect...")
-                        success, msg = self.vpn_manager.connect_random_location()
+                        success, msg = self._run_async(self.vpn_manager.connect_random_location())
                         if success:
                             self.vpn_connected_at_start = True
                             self.current_vpn_location = msg
@@ -438,18 +455,19 @@ class RedditBotEngine:
                     self.vpn_manager = ExpressVPNManager(log_callback=self.log)
                     if self.vpn_manager.is_available():
                         self.log("🔒 ExpressVPN detected")
-                        self.log(f"📍 Available locations: {len(self.vpn_manager.list_locations())}")
+                        locs = self._run_async(self.vpn_manager.list_locations())
+                        self.log(f"📍 Available locations: {len(locs)}")
                         self.log("🌐 Connecting to ExpressVPN server...")
                         start_ts = time.time()
-                        success, msg = self.vpn_manager.connect(None)  # Smart location
+                        success, msg = self._run_async(self.vpn_manager.connect(None))  # Smart location
                         if not success:
-                            success, msg = self.vpn_manager.connect_random_location()
+                            success, msg = self._run_async(self.vpn_manager.connect_random_location())
                         # Soft timeout guard
                         if time.time() - start_ts > 30:
                             self.log("⚠️  VPN connect taking long; continue with current status.")
                         if success:
                             time.sleep(5)
-                            is_connected, vpn_location = self.vpn_manager.get_status()
+                            is_connected, vpn_location = self._run_async(self.vpn_manager.get_status())
                             if is_connected:
                                 self.current_vpn_location = vpn_location
                                 ip, country, full_location = get_ip_info()
@@ -524,4 +542,3 @@ class RedditBotEngine:
         Parsing is by whitespace tokens (matching parse_credentials).
         """
         prune_credentials_entry_util(file_path, email, password, log_callback=self.log)
-

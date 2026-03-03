@@ -10,6 +10,9 @@ from typing import Optional, Dict, List, Tuple
 from supabase import create_client, Client
 import requests
 from config import SUPABASE_URL, SUPABASE_KEY
+from logger import setup_logger
+
+logger = setup_logger("database")
 
 class Database:
     def __init__(self):
@@ -23,28 +26,61 @@ class Database:
         self.client: Client = create_client(self.supabase_url, self.supabase_key)
         self.current_user_id = None
         self.current_license_key = None
-    
+
+    @staticmethod
+    def _parse_date(date_str: str) -> datetime:
+        """
+        Safely parse a Supabase datetime string into a naive UTC datetime.
+
+        Supabase may return strings like '2026-03-02 14:33:18.61732+00'
+        (timezone without colon), which Python's datetime.fromisoformat()
+        cannot handle on Python < 3.11.  This method normalises the string
+        before parsing so it works on all supported Python versions.
+        """
+        # Replace space separator with 'T' for strict ISO-8601
+        s = date_str.strip().replace(' ', 'T')
+        # Normalise bare '+00' / '-00' / '+05:30' etc. → always keep coloned form
+        import re
+        s = re.sub(r'([+-])(\d{2}):?(\d{2})$', lambda m: f"{m.group(1)}{m.group(2)}:{m.group(3)}", s)
+        # Replace trailing 'Z' with '+00:00'
+        if s.endswith('Z'):
+            s = s[:-1] + '+00:00'
+        dt = datetime.fromisoformat(s)
+        # Return as a naive UTC datetime for consistent comparisons
+        return dt.replace(tzinfo=None)
+
     def get_client_ip(self) -> str:
         """Get the current client's public IP address."""
         try:
-            response = requests.get('https://api.ipify.org?format=json', timeout=5)
-            return response.json().get('ip', '0.0.0.0')
-        except:
+            # Use multiple IP providers for redundancy
+            providers = [
+                'https://api.ipify.org?format=json',
+                'https://ipapi.co/json/',
+                'https://ifconfig.me/all.json'
+            ]
+            for url in providers:
+                try:
+                    response = requests.get(url, timeout=5)
+                    if response.status_code == 200:
+                        data = response.json()
+                        ip = data.get('ip') or data.get('query') or data.get('ip_addr')
+                        if ip:
+                            return ip
+                except Exception as e:
+                    logger.warning(f"Failed to get IP from {url}: {str(e)}")
+                    continue
+            return '0.0.0.0'
+        except Exception as e:
+            logger.error(f"Critical error in get_client_ip: {str(e)}")
             return '0.0.0.0'
     
     def get_hwid(self) -> str:
         """
         Generate a unique Hardware ID (HWID) for the current machine.
-        Uses a combination of MAC address and system-specific markers.
+        Uses a stable randomly generated UUID stored in a local file.
+        This prevents false device changes caused by MAC address randomization (common on macOS/VPNs).
         """
         try:
-            # Get MAC address as a base
-            mac = uuid.getnode()
-            # Create a stable hash of the hardware identifier
-            hwid_str = f"RB-HWID-{mac}"
-            return hashlib.sha256(hwid_str.encode()).hexdigest().upper()[:24]
-        except:
-            # Fallback to a random UUID stored in a local file if hardware check fails
             hwid_file = os.path.join(os.path.expanduser("~"), ".reddit_bot_hwid")
             if os.path.exists(hwid_file):
                 with open(hwid_file, "r") as f:
@@ -54,6 +90,12 @@ class Database:
                 with open(hwid_file, "w") as f:
                     f.write(new_hwid)
                 return new_hwid
+        except Exception as e:
+            logger.error(f"Failed to read/write HWID file: {str(e)}")
+            # Fallback to something stable if file access completely fails
+            import platform
+            fallback_str = f"RB-FALLBACK-{platform.node()}"
+            return hashlib.sha256(fallback_str.encode()).hexdigest().upper()[:24]
 
     def hash_password(self, password: str) -> str:
         """Hash password using SHA-256."""
@@ -93,12 +135,12 @@ class Database:
             
             if user.get('is_active'):
                 if start_date_str:
-                    start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                    start_date = self._parse_date(start_date_str)
                     if now < start_date:
                         return False, f"Plan Error: Your plan is scheduled to start on {start_date.strftime('%Y-%m-%d')}.", None
-                
+
                 if end_date_str:
-                    end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                    end_date = self._parse_date(end_date_str)
                     if now > end_date:
                         return False, f"Plan Expired: Your subscription ended on {end_date.strftime('%Y-%m-%d')}. Please renew to continue.", None
 
@@ -156,7 +198,7 @@ class Database:
             now = datetime.utcnow()
             end_date_str = user.get('plan_end_date')
             if end_date_str:
-                end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                end_date = self._parse_date(end_date_str)
                 if now > end_date:
                     return False, "Subscription expired", None
             
@@ -246,7 +288,7 @@ class Database:
             return session_id
             
         except Exception as e:
-            print(f"Error creating session: {e}")
+            logger.error(f"Error creating session: {str(e)}")
             return None
     
     def end_session(self, session_id: str, accounts_processed: int, 
@@ -278,7 +320,7 @@ class Database:
             }).eq('session_id', session_id).execute()
             
         except Exception as e:
-            print(f"Error ending session: {e}")
+            logger.error(f"Error ending session: {str(e)}")
     
     def log_account_result(self, session_id: str, email: str, status: str, 
                           password: Optional[str] = None,
@@ -338,7 +380,7 @@ class Database:
                 json.dump(results, f, indent=2)
                 
         except Exception as e:
-            print(f"Error logging account result locally: {e}")
+            logger.error(f"Error logging account result locally: {str(e)}")
 
     def log_batch_results(self, accounts: List[Dict], status: str = "pending"):
         """Log a bulk list of accounts (e.g., during import) as pending."""
@@ -384,7 +426,7 @@ class Database:
                 
             return True
         except Exception as e:
-            print(f"Error logging batch: {e}")
+            logger.error(f"Error logging batch: {str(e)}")
             return False
     
     def get_user_stats(self) -> Optional[Dict]:
@@ -398,7 +440,7 @@ class Database:
                 return result.data[0]
             return None
         except Exception as e:
-            print(f"Error getting user stats: {e}")
+            logger.error(f"Error getting user stats: {str(e)}")
             return None
     
     def get_all_users(self) -> List[Dict]:
@@ -407,7 +449,7 @@ class Database:
             result = self.client.table('users').select('*').order('created_at', desc=True).execute()
             return result.data if result.data else []
         except Exception as e:
-            print(f"Error getting all users: {e}")
+            logger.error(f"Error getting all users: {str(e)}")
             return []
 
     def create_user(self, username: str, license_key: str, password: str, 
@@ -475,6 +517,6 @@ class Database:
             result = self.client.table('usage_logs').select('*').eq('user_id', self.current_user_id).order('session_start', desc=True).limit(limit).execute()
             return result.data if result.data else []
         except Exception as e:
-            print(f"Error getting recent sessions: {e}")
+            logger.error(f"Error getting recent sessions: {str(e)}")
             return []
 

@@ -5,15 +5,17 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from collections import deque
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Body, File, UploadFile
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Body, File, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import asyncio
 
 # Internal imports
 from database import Database
 from bot_engine import RedditBotEngine
 from vpn_manager import ExpressVPNManager
 from config import VPN_REQUIRE_CONNECTION
+from logger import logger
 
 app = FastAPI(title="Reddit Bot API - Modern UI Gateway")
 
@@ -61,16 +63,42 @@ class AppState:
             "start_time": None
         }
         self.current_session_id = None
-        self.current_vpn_location = "Checking..."
+        self.current_vpn_location = "Initializing..."
         self.lock = threading.Lock()
-        
-        # Initial check
-        try:
-            is_connected, loc = self.vpn_manager.get_status()
-            self.current_vpn_location = loc if is_connected else "Disconnected"
-        except:
-            self.current_vpn_location = "Unavailable"
         self.stop_requested = False
+        
+        # Load user settings
+        self.settings = self.load_user_settings()
+
+    def load_user_settings(self) -> Dict[str, Any]:
+        import json
+        default_settings = {
+            "browser_type": "chromium",
+            "headless": False,
+            "delay_min": 3,
+            "delay_max": 5,
+            "max_parallel_browsers": 5,
+            "stealth_enabled": True,
+            "humanize_input": True,
+            "vpn_enabled": True,
+            "vpn_rotate_per_batch": True,
+            "persistent_context": False
+        }
+        try:
+            if os.path.exists("user_settings.json"):
+                with open("user_settings.json", "r") as f:
+                    return {**default_settings, **json.load(f)}
+        except Exception:
+            pass
+        return default_settings
+
+    def save_user_settings(self):
+        import json
+        try:
+            with open("user_settings.json", "w") as f:
+                json.dump(self.settings, f, indent=4)
+        except Exception:
+            pass
 
     def reset_stats(self):
         self.stats = {
@@ -88,20 +116,46 @@ class AppState:
 state = AppState()
 
 # --- Helpers ---
-def log_to_state(message: str):
-    """Callback for bot engine to write logs into shared state."""
+def log_to_state(message: str, level: str = "info"):
+    """Callback for bot engine to write logs into shared state and persistent logger."""
     with state.lock:
         timestamp = datetime.now().strftime("%H:%M:%S")
+        log_type = "info"
+        if "success" in message.lower(): log_type = "success"
+        elif "error" in message.lower() or "failed" in message.lower(): log_type = "error"
+        elif "warning" in message.lower(): log_type = "warning"
+        
         state.logs.append({
             "timestamp": timestamp,
             "message": message,
-            "type": "info" if "success" not in message.lower() else "success"
+            "type": log_type
         })
+    
+    # Mirror to persistent logger
+    if level == "error":
+        logger.error(message)
+    elif level == "warning":
+        logger.warning(message)
+    else:
+        logger.info(message)
 
 def progress_update(snapshot: Dict[str, Any]):
     """Callback for bot engine to update stats."""
     with state.lock:
         state.stats.update(snapshot)
+
+# --- App Lifecycle ---
+@app.on_event("startup")
+async def startup_event():
+    """Perform async startup tasks."""
+    logger.info("Application starting up...")
+    try:
+        is_connected, loc = await state.vpn_manager.get_status()
+        state.current_vpn_location = loc if is_connected else "Disconnected"
+        logger.info(f"Initial VPN Status: {state.current_vpn_location}")
+    except Exception as e:
+        logger.error(f"Failed to get initial VPN status: {e}")
+        state.current_vpn_location = "Error"
 
 # --- Background Worker ---
 def bot_worker(file_path: str, parallel_browsers: int):
@@ -222,12 +276,63 @@ async def update_username(req: UpdateUsernameRequest):
         raise HTTPException(status_code=400, detail=msg)
     return {"status": "success", "message": msg}
 
+@app.get("/bot/settings")
+async def get_bot_settings():
+    """Return user-configurable bot settings (safe for UI)."""
+    return state.settings
+
+@app.post("/bot/settings")
+async def update_bot_settings(new_settings: Dict[str, Any]):
+    """Update bot settings and persist them."""
+    state.settings.update(new_settings)
+    state.save_user_settings()
+    return {"status": "success", "settings": state.settings}
+
+@app.get("/auth/saved-credentials")
+async def get_saved_credentials():
+    """Retrieve saved credentials for auto-login."""
+    import json
+    try:
+        if os.path.exists("saved_credentials.json"):
+            with open("saved_credentials.json", "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
 @app.post("/auth/login")
 async def login(credentials: LoginRequest):
+    import json
     success, msg, user = state.db.authenticate_user(credentials.license_key, credentials.password)
     if not success:
         raise HTTPException(status_code=401, detail=msg)
+    
+    # Save credentials for persistence (ExpressVPN style)
+    try:
+        with open("saved_credentials.json", "w") as f:
+            json.dump({
+                "license_key": credentials.license_key,
+                "password": credentials.password
+            }, f)
+    except Exception:
+        pass
+        
     return {"status": "success", "user": user}
+
+@app.post("/auth/logout")
+async def logout():
+    """Explicit logout to clear saved credentials."""
+    try:
+        if os.path.exists("saved_credentials.json"):
+            os.remove("saved_credentials.json")
+        
+        # Reset current user in DB state
+        state.db.current_user_id = None
+        state.db.current_license_key = None
+        
+        return {"status": "success", "message": "Logged out successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 def parse_credentials_text(text: str) -> List[Dict]:
     """Parse email:password format from text."""
@@ -292,20 +397,21 @@ async def start_bot(
     
     # VPN Check and Auto-Connect
     try:
-        is_connected, location = state.vpn_manager.get_status()
+        is_connected, location = await state.vpn_manager.get_status()
         if not is_connected:
             log_to_state("🔒 VPN not connected. Attempting auto-connect...")
-            success, msg = state.vpn_manager.connect_random_location()
+            success, msg = await state.vpn_manager.connect_random_location()
             if not success:
                 state.current_vpn_location = "Failed to connect"
                 if VPN_REQUIRE_CONNECTION:
                     return {"status": "error", "message": f"VPN Auto-connect failed: {msg}. Connection is mandatory."}
-                log_to_state(f"⚠️ VPN Auto-connect failed: {msg}. Continuing as per config.")
+                log_to_state(f"⚠️ VPN Auto-connect failed: {msg}. Continuing as per config.", "warning")
             else:
                 state.current_vpn_location = msg
                 log_to_state(f"✅ VPN Auto-connected: {msg}")
     except Exception as e:
         state.current_vpn_location = "Error"
+        logger.exception("VPN Check/Connect failed")
         if VPN_REQUIRE_CONNECTION:
             return {"status": "error", "message": f"VPN check/connect failed: {str(e)}"}
     
@@ -371,36 +477,59 @@ async def get_results():
 @app.get("/vpn/status")
 async def vpn_status():
     try:
-        is_connected, location = state.vpn_manager.get_status()
+        is_connected, location = await state.vpn_manager.get_status()
+        state.current_vpn_location = location if is_connected else "Disconnected"
         return {"connected": bool(is_connected), "location": location}
-    except Exception:
+    except Exception as e:
+        logger.error(f"VPN status error: {e}")
         return {"connected": False, "location": None}
 
 @app.post("/vpn/connect")
 async def vpn_connect(location: str = None):
     try:
         if location:
-            success, msg = state.vpn_manager.connect(location)
+            success, msg = await state.vpn_manager.connect(location)
         else:
-            success, msg = state.vpn_manager.connect_random_location()
+            success, msg = await state.vpn_manager.connect_random_location()
+        
+        if success:
+            state.current_vpn_location = msg
         return {"success": success, "message": msg}
     except Exception as e:
+        logger.exception("VPN connect endpoint failed")
         return {"success": False, "message": str(e)}
 
 @app.post("/vpn/disconnect")
 async def vpn_disconnect():
     try:
-        state.vpn_manager.disconnect()
-        return {"success": True, "message": "Disconnected"}
+        success, msg = await state.vpn_manager.disconnect()
+        state.current_vpn_location = "Disconnected"
+        return {"success": success, "message": msg}
     except Exception as e:
+        logger.error(f"VPN disconnect error: {e}")
+        return {"success": False, "message": str(e)}
+
+@app.post("/vpn/rotate")
+async def vpn_rotate():
+    """Explicitly trigger a VPN rotation."""
+    try:
+        log_to_state("🔄 Rotating VPN location...")
+        success, msg = await state.vpn_manager.rotate_location()
+        if success:
+            state.current_vpn_location = msg
+            log_to_state(f"✅ VPN Rotated: {msg}")
+        return {"success": success, "message": msg}
+    except Exception as e:
+        logger.exception("VPN rotate endpoint failed")
         return {"success": False, "message": str(e)}
 
 @app.get("/vpn/locations")
 async def vpn_locations():
     try:
-        locs = state.vpn_manager.list_locations()
+        locs = await state.vpn_manager.list_locations()
         return locs or []
-    except Exception:
+    except Exception as e:
+        logger.error(f"VPN list locations error: {e}")
         return []
 
 # --- Entry Point ---

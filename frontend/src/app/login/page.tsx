@@ -18,6 +18,7 @@ export default function LoginPage() {
 
         try {
             await botApi.login(licenseKey, password);
+            localStorage.setItem('reddit_bot_auth_token', licenseKey); // Ensure it's saved client-side immediately
             window.location.href = '/';
         } catch (err: any) {
             setError(err.response?.data?.detail || 'Invalid credentials or connection error.');

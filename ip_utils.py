@@ -4,6 +4,9 @@ IP and Location Utilities - Get IP address and country information
 import requests
 from typing import Optional, Tuple
 from typing import Dict, Any
+from logger import setup_logger
+
+logger = setup_logger("ip_utils")
 
 def get_ip_info() -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
@@ -32,8 +35,8 @@ def get_ip_info() -> Tuple[Optional[str], Optional[str], Optional[str]]:
             location = ', '.join(location_parts) if location_parts else country or 'Unknown'
             
             return ip, country, location
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to get IP info from ipapi.co: {str(e)}")
     
     try:
         # Fallback to ipify + ip-api
@@ -61,13 +64,13 @@ def get_ip_info() -> Tuple[Optional[str], Optional[str], Optional[str]]:
                     location = ', '.join(location_parts) if location_parts else country or 'Unknown'
                     
                     return ip, country, location
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to get geo info for IP {ip}: {str(e)}")
             
             # If geo lookup fails, just return IP
             return ip, None, None
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to get fallback IP info: {str(e)}")
     
     return None, None, None
 
@@ -77,8 +80,8 @@ def get_ip_address() -> Optional[str]:
         response = requests.get('https://api.ipify.org', timeout=5)
         if response.status_code == 200:
             return response.text.strip()
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to get simple IP address: {str(e)}")
     return None
 
 def get_geo_profile() -> Dict[str, Any]:
@@ -122,8 +125,8 @@ def get_geo_profile() -> Dict[str, Any]:
             profile["latitude"] = data.get("latitude")
             profile["longitude"] = data.get("longitude")
             return profile
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to get geo profile from ipapi.co: {str(e)}")
 
     # Fallback: best effort using ip-api.com
     try:
@@ -146,8 +149,8 @@ def get_geo_profile() -> Dict[str, Any]:
                     profile["locale"] = "en-US"
                     profile["latitude"] = g.get("lat")
                     profile["longitude"] = g.get("lon")
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to get geo profile fallback: {str(e)}")
 
     return profile
 

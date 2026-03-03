@@ -1,0 +1,12 @@
+{
+    "browser_type": "chromium",
+    "headless": false,
+    "delay_min": 3,
+    "delay_max": 5,
+    "max_parallel_browsers": 5,
+    "stealth_enabled": true,
+    "humanize_input": true,
+    "vpn_enabled": true,
+    "vpn_rotate_per_batch": true,
+    "persistent_context": false
+}

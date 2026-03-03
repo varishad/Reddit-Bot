@@ -856,7 +856,7 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                 return
             
             engine.log("🚫 Disconnecting current ExpressVPN connection...")
-            vpn_manager.disconnect()
+            engine._run_async(vpn_manager.disconnect())
             if interruptible_sleep(engine, 0.5):
                 engine.log("⏹️ Stop requested during VPN disconnect - aborting")
                 return
@@ -879,17 +879,17 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                 VPN_PREFERRED_COUNTRIES, VPN_AVOID_COUNTRIES = [], []
                 VPN_LOCATION_COOLDOWN_SECONDS = 900
                 VPN_LOCATION_MAX_TRIES_PER_ROTATION = 10
-            success, msg = vpn_manager.connect_with_strategy(
+            success, msg = engine._run_async(vpn_manager.connect_with_strategy(
                 preferred=VPN_PREFERRED_COUNTRIES,
                 avoid=VPN_AVOID_COUNTRIES,
                 cooldown_seconds=int(VPN_LOCATION_COOLDOWN_SECONDS),
                 max_candidates=int(VPN_LOCATION_MAX_TRIES_PER_ROTATION),
-            )
+            ))
             if success:
                 if interruptible_sleep(engine, 2.0):
                     engine.log("⏹️ Stop requested during VPN stabilization - aborting")
                     return
-                is_connected, new_vpn_location = vpn_manager.get_status()
+                is_connected, new_vpn_location = engine._run_async(vpn_manager.get_status())
                 if is_connected:
                     engine.current_vpn_location = new_vpn_location
                     engine.log(f"✅ Connected to new server: {new_vpn_location}")

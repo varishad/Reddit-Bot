@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { clsx } from 'clsx';
 import {
   CheckCircle2, XCircle, AlertTriangle, Wifi, Clock, Zap, RefreshCw, Globe
 } from 'lucide-react';
@@ -80,27 +81,29 @@ export default function DashboardPage() {
       </AnimatePresence>
 
       <div className="flex flex-col gap-8 p-6">
-        {/* Header */}
+        {/* Minimal status row — no page title, just floating status like ExpressVPN */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Control Center</h1>
-            <div className="flex items-center gap-4 mt-0.5">
-              <p className="text-slate-500 text-xs">
-                {status?.session_id ? `Session: ${status.session_id.slice(0, 8)}…` : 'No active session'}
-              </p>
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20">
-                <Globe className="w-3 h-3 text-blue-400" />
-                <span className="text-[10px] font-medium text-blue-300 uppercase tracking-tight">
-                  {status?.vpn_location || 'Disconnected'}
-                </span>
-              </div>
+          <div className="flex items-center gap-2">
+            {/* Session indicator */}
+            <span className="text-[11px] text-slate-600 font-medium">
+              {status?.session_id ? `Session · ${status.session_id.slice(0, 8)}` : 'No active session'}
+            </span>
+            {/* VPN chip */}
+            <div className={clsx(
+              'flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border',
+              status?.vpn_location
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                : 'bg-white/5 border-white/5 text-slate-600'
+            )}>
+              <Globe className="w-2.5 h-2.5" />
+              {status?.vpn_location || 'Disconnected'}
             </div>
           </div>
           <button
             onClick={refresh}
-            className="p-2 rounded-xl glass hover:border-white/20 transition-all duration-200 text-slate-400 hover:text-slate-200"
+            className="p-1.5 rounded-xl hover:bg-white/5 transition-all text-slate-600 hover:text-slate-300"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-3.5 h-3.5" />
           </button>
         </div>
 

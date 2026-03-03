@@ -6,6 +6,7 @@ import time
 import random
 import os
 import re
+import asyncio
 from typing import List, Optional, Tuple
 from typing import Dict
 
@@ -130,7 +131,27 @@ class ExpressVPNManager:
         
         return False
 
-    def ensure_app_running(self) -> bool:
+        return False
+
+    async def _run_command_async(self, cmd: List[str], timeout: int = 30) -> Tuple[int, str, str]:
+        """Run a command asynchronously and return (returncode, stdout, stderr)."""
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            return process.returncode, stdout.decode(errors='replace'), stderr.decode(errors='replace')
+        except asyncio.TimeoutError:
+            try:
+                process.kill()
+            except:
+                pass
+            return -1, "", "Timeout"
+
+    async def ensure_app_running(self) -> bool:
         """Attempt to open the ExpressVPN GUI app depending on the OS."""
         try:
             if os.name == 'nt':  # Windows
@@ -147,13 +168,14 @@ class ExpressVPNManager:
             else:  # macOS/Linux
                 if os.path.exists("/Applications/ExpressVPN.app"):
                     self.log("Opening ExpressVPN app on macOS...")
-                    subprocess.run(["open", "-a", "ExpressVPN"], check=False)
+                    process = await asyncio.create_subprocess_exec("open", "-a", "ExpressVPN")
+                    await process.wait()
                     return True
                 else:
                     # Generic linux/fallback
                     try:
-                        subprocess.run(["expressvpn", "--version"], capture_output=True)
-                        return True
+                        returncode, stdout, stderr = await self._run_command_async(["expressvpn", "--version"], timeout=5)
+                        return returncode == 0
                     except:
                         pass
         except Exception as e:
@@ -164,24 +186,18 @@ class ExpressVPNManager:
         """Check if ExpressVPN is available."""
         return self.expressvpn_path is not None
     
-    def get_status(self) -> Tuple[bool, Optional[str]]:
+    async def get_status(self) -> Tuple[bool, Optional[str]]:
         """Get current VPN status. Returns (is_connected, location_or_error)."""
         if not self.is_available():
             return False, "ExpressVPN not found"
         
         try:
             # Try status command
-            result = subprocess.run(
-                [self.expressvpn_path, "status"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
+            returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "status"], timeout=10)
             
             # Check both stdout and stderr (CLI might output to stderr)
-            output = (result.stdout + result.stderr).lower()
-            full_output = result.stdout + result.stderr
+            output = (stdout + stderr).lower()
+            full_output = stdout + stderr
             
             # Check for elevation/permission errors
             if "error 740" in output or "requires elevation" in output or "administrator" in output:
@@ -242,7 +258,7 @@ class ExpressVPNManager:
                 return False, "Admin rights needed"
             return False, f"Error: {str(e)[:30]}"
     
-    def list_locations(self) -> List[str]:
+    async def list_locations(self) -> List[str]:
         """Get list of available VPN locations."""
         if not self.is_available():
             return []
@@ -251,16 +267,10 @@ class ExpressVPNManager:
             return self.available_locations
         
         try:
-            result = subprocess.run(
-                [self.expressvpn_path, "list"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
+            returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "list"], timeout=30)
             
             locations = []
-            lines = result.stdout.split('\n')
+            lines = stdout.split('\n')
             for line in lines:
                 line = line.strip()
                 # Skip headers and separators
@@ -299,14 +309,8 @@ class ExpressVPNManager:
             
             # Also try "list all" for more locations
             try:
-                result2 = subprocess.run(
-                    [self.expressvpn_path, "list", "all"],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                )
-                lines2 = result2.stdout.split('\n')
+                returncode2, stdout2, stderr2 = await self._run_command_async([self.expressvpn_path, "list", "all"], timeout=30)
+                lines2 = stdout2.split('\n')
                 for line in lines2:
                     line = line.strip()
                     # Skip headers and separators
@@ -343,7 +347,7 @@ class ExpressVPNManager:
             self.log(f"Error getting locations: {str(e)}")
             return []
     
-    def connect(self, location: Optional[str] = None) -> Tuple[bool, str]:
+    async def connect(self, location: Optional[str] = None) -> Tuple[bool, str]:
         """
         Connect to VPN location.
         If location is None, connects to smart location or random location.
@@ -354,14 +358,8 @@ class ExpressVPNManager:
         
         try:
             # Check if logged in first
-            login_check = subprocess.run(
-                [self.expressvpn_path, "status"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
-            login_output = (login_check.stdout + login_check.stderr).lower()
+            returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "status"], timeout=10)
+            login_output = (stdout + stderr).lower()
             
             # Check for common errors that indicate not logged in
             if "not logged in" in login_output or "please log in" in login_output or "authentication" in login_output:
@@ -369,8 +367,8 @@ class ExpressVPNManager:
             
             # Disconnect first if connected
             if self.is_connected:
-                self.disconnect()
-                time.sleep(0.5)  # Reduced from 2s to 0.5s
+                await self.disconnect()
+                await asyncio.sleep(0.5)
             
             # Build command
             if location:
@@ -380,22 +378,16 @@ class ExpressVPNManager:
                 cmd = [self.expressvpn_path, "connect", "smart"]
                 self.log("🔗 [VPN] Auto-connecting to smart location...")
             
-            # Ensure app is running if we get a failure potentially, or just pro-actively
-            self.ensure_app_running()
-            time.sleep(1)
+            # Ensure app is running
+            await self.ensure_app_running()
+            await asyncio.sleep(1)
             
             # Connect to location
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60,  # Increased timeout
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
+            returncode, stdout, stderr = await self._run_command_async(cmd, timeout=60)
             
             # Check for elevation error
-            output = (result.stdout + result.stderr).lower()
-            full_output = result.stdout + result.stderr
+            output = (stdout + stderr).lower()
+            full_output = stdout + stderr
             
             if "error 740" in output or "requires elevation" in output or "administrator" in output:
                 return False, "Admin rights required. Run app as Administrator."
@@ -412,12 +404,12 @@ class ExpressVPNManager:
             
             # Check if connection command shows success
             if "connected" in output.lower() or "connecting" in output.lower():
-                # Wait for connection to establish (optimized wait)
+                # Wait for connection to establish
                 self.log("Waiting for connection to establish...")
-                time.sleep(3)  # Reduced from 8s to 3s
+                await asyncio.sleep(3)
                 
-                # Verify connection using get_status() - this is the most reliable check
-                is_connected, status_msg = self.get_status()
+                # Verify connection using get_status()
+                is_connected, status_msg = await self.get_status()
                 
                 if is_connected:
                     # Connection successful, return the location
@@ -426,8 +418,8 @@ class ExpressVPNManager:
                 else:
                     # Connection might still be establishing, try one more time
                     self.log("Connection not verified yet, waiting a bit more...")
-                    time.sleep(2)  # Reduced from 5s to 2s
-                    is_connected, status_msg = self.get_status()
+                    await asyncio.sleep(2)
+                    is_connected, status_msg = await self.get_status()
                     
                     if is_connected:
                         return True, status_msg
@@ -459,33 +451,27 @@ class ExpressVPNManager:
                 return False, "Admin rights required. Run app as Administrator."
             return False, f"Connection error: {str(e)[:50]}"
     
-    def disconnect(self) -> Tuple[bool, str]:
+    async def disconnect(self) -> Tuple[bool, str]:
         """Disconnect from VPN. Returns (success, message)."""
         if not self.is_available():
             return False, "ExpressVPN not found"
         
         try:
-            result = subprocess.run(
-                [self.expressvpn_path, "disconnect"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
+            returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "disconnect"], timeout=15)
             
-            time.sleep(1)
+            await asyncio.sleep(1)
             self.is_connected = False
             self.current_location = None
             return True, "Disconnected"
         except Exception as e:
             return False, f"Disconnect error: {str(e)}"
     
-    def connect_random_location(self) -> Tuple[bool, str]:
+    async def connect_random_location(self) -> Tuple[bool, str]:
         """Connect to a random available location."""
-        locations = self.list_locations()
+        locations = await self.list_locations()
         if not locations:
             # Try smart location if list fails
-            return self.connect(None)
+            return await self.connect(None)
         
         # Filter out current location if connected
         available = [loc for loc in locations if loc != self.current_location]
@@ -493,29 +479,29 @@ class ExpressVPNManager:
             available = locations
         
         location = random.choice(available)
-        return self.connect(location)
+        return await self.connect(location)
     
-    def rotate_location(self) -> Tuple[bool, str]:
+    async def rotate_location(self) -> Tuple[bool, str]:
         """Rotate to a new VPN location (disconnect and connect to new one)."""
         # First, get current status to see if we're connected
-        current_status, _ = self.get_status()
+        current_status, _ = await self.get_status()
         
-        locations = self.list_locations()
+        locations = await self.list_locations()
         if not locations:
             # Try smart location
-            return self.connect(None)
+            return await self.connect(None)
         
         # Get a different location (avoid current one)
         available = [loc for loc in locations if loc != self.current_location]
         if not available:
             available = locations
         
-        # Clean location names (remove extra spaces, numbers) before connecting
+        # Clean location names
         cleaned_available = []
         for loc in available:
             # Remove trailing numbers and extra spaces
             cleaned = re.sub(r'\s+\d+\s*$', '', loc).strip()
-            cleaned = re.sub(r'\s+', ' ', cleaned)  # Normalize spaces
+            cleaned = re.sub(r'\s+', ' ', cleaned)
             if cleaned and len(cleaned) > 2:
                 cleaned_available.append(cleaned)
         
@@ -527,11 +513,11 @@ class ExpressVPNManager:
         
         # If already connected, disconnect first
         if current_status:
-            self.disconnect()
-            time.sleep(2)  # Wait for disconnect
+            await self.disconnect()
+            await asyncio.sleep(2)
         
         # Connect to new location
-        return self.connect(new_location)
+        return await self.connect(new_location)
 
     def _filter_locations(self, locations: List[str], preferred: List[str], avoid: List[str]) -> List[str]:
         if not locations:
@@ -542,21 +528,18 @@ class ExpressVPNManager:
         # Remove avoid
         filtered = [loc for loc in locations if not any(a in loc.lower() for a in avoid_l)]
         if not filtered:
-            filtered = locations[:]  # fallback to all if we filtered too much
+            filtered = locations[:]  # fallback to all
         # Prefer preferred
         preferred_list = [loc for loc in filtered if any(p in loc.lower() for p in pref_l)] if pref_l else []
         return preferred_list or filtered
 
-    def connect_with_strategy(self, preferred: Optional[List[str]] = None, avoid: Optional[List[str]] = None, cooldown_seconds: int = 900, max_candidates: int = 10) -> Tuple[bool, str]:
+    async def connect_with_strategy(self, preferred: Optional[List[str]] = None, avoid: Optional[List[str]] = None, cooldown_seconds: int = 900, max_candidates: int = 10) -> Tuple[bool, str]:
         """
         Connect to a location using cooldown and success-based scoring.
-        - Avoid reusing a location within cooldown window
-        - Prefer 'preferred' countries/cities; avoid 'avoid'
-        - Bias selection towards higher score (past successes)
         """
-        locations = self.list_locations()
+        locations = await self.list_locations()
         if not locations:
-            return self.connect(None)
+            return await self.connect(None)
         candidates = self._filter_locations(locations, preferred or [], avoid or [])
         now = time.time()
         # Exclude cooldowned locations
@@ -566,11 +549,11 @@ class ExpressVPNManager:
         candidates = [c for c in candidates if not_on_cooldown(c)]
         if not candidates:
             candidates = self._filter_locations(locations, preferred or [], avoid or [])
-        # Score sort (descending)
+        # Score sort
         def score(loc: str) -> float:
             return self._location_score.get(loc, 0.0)
         candidates.sort(key=score, reverse=True)
-        # Try top-N random shuffle within top slice
+        # Try top-N random shuffle
         if candidates:
             top_slice = candidates[:max_candidates]
             random.shuffle(top_slice)
@@ -580,7 +563,7 @@ class ExpressVPNManager:
         tried = 0
         for loc in top_slice or locations:
             tried += 1
-            ok, msg = self.connect(loc)
+            ok, msg = await self.connect(loc)
             if ok:
                 self._location_last_used[loc] = time.time()
                 # Small positive reinforcement
@@ -592,6 +575,4 @@ class ExpressVPNManager:
             if tried >= max_candidates:
                 break
         # Fallback to smart
-        return self.connect(None)
-
-
+        return await self.connect(None)
