@@ -24,6 +24,11 @@ class ExpressVPNManager:
             r"C:\Program Files\ExpressVPN\expressvpn.exe",
             r"C:\Program Files (x86)\ExpressVPN\ExpressVPN.exe",  # Alternative name
             r"C:\Program Files\ExpressVPN\ExpressVPN.exe",  # Alternative name
+            "/usr/local/bin/expressvpn",
+            "/opt/homebrew/bin/expressvpn",
+            "/usr/bin/expressvpn",
+            "/Applications/ExpressVPN.app/Contents/Resources/expressvpn",
+            "/Applications/ExpressVPN.app/Contents/MacOS/expressvpnctl",
             "expressvpn"  # If in PATH
         ]
         self.expressvpn_path = None
@@ -37,6 +42,65 @@ class ExpressVPNManager:
         # Find ExpressVPN installation
         self._find_expressvpn()
     
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """Check for common installation issues."""
+        # Re-scan for ExpressVPN if not found yet
+        if not self.expressvpn_path:
+            self._find_expressvpn()
+
+        diag = {
+            "os": os.name,
+            "exe_found": self.expressvpn_path is not None,
+            "exe_path": self.expressvpn_path,
+            "is_mac": os.path.exists("/Applications/ExpressVPN.app"),
+            "cli_accessible": False,
+            "error_hint": None
+        }
+        
+        # Specifically for macOS: check bundle ID
+        is_ios_version = False
+        is_official_mac = False
+        if diag["is_mac"]:
+            try:
+                plist_path = "/Applications/ExpressVPN.app/Contents/Info.plist"
+                if os.path.exists(plist_path):
+                    import subprocess
+                    bid = subprocess.check_output(
+                        ["/usr/libexec/PlistBuddy", "-c", "Print CFBundleIdentifier", plist_path],
+                        text=True
+                    ).strip()
+                    if bid == "com.expressvpn.iosvpn":
+                        is_ios_version = True
+                    elif bid == "com.expressvpn.expressvpn" or bid == "com.express.vpn":
+                        is_official_mac = True
+            except:
+                pass
+
+        if self.expressvpn_path:
+            try:
+                result = subprocess.run(
+                    [self.expressvpn_path, "status"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+                diag["cli_accessible"] = True
+            except Exception as e:
+                diag["error_hint"] = f"CLI Command Error: {str(e)}"
+        else:
+            if diag["is_mac"]:
+                if is_ios_version:
+                    diag["error_hint"] = "You still have the 'App Store' version. Please DELETE it and download the 'Official Mac version' from expressvpn.com/vpn-software/vpn-mac"
+                elif is_official_mac:
+                    diag["error_hint"] = "Official ExpressVPN found, but CLI is missing. Try restarting your Mac or running 'defaults write com.expressvpn.expressvpn.cli InstallCLI -bool true' in Terminal if you know how."
+                else:
+                    diag["error_hint"] = "ExpressVPN app found, but CLI tools are missing. Please ensure you downloaded the version from expressvpn.com (not the App Store)."
+            else:
+                diag["error_hint"] = "ExpressVPN not found. Please install it to use VPN features."
+        
+        return diag
+
     def _find_expressvpn(self) -> bool:
         """Find ExpressVPN executable."""
         for path in self.expressvpn_paths:
@@ -189,65 +253,57 @@ class ExpressVPNManager:
     async def get_status(self) -> Tuple[bool, Optional[str]]:
         """Get current VPN status. Returns (is_connected, location_or_error)."""
         if not self.is_available():
-            return False, "ExpressVPN not found"
+            return False, "Not installed"
+        
+        is_ctl = "expressvpnctl" in self.expressvpn_path.lower()
         
         try:
-            # Try status command
+            # For v12 (expressvpnctl), we can get precise connection state
+            if is_ctl:
+                rc, stdout, stderr = await self._run_command_async([self.expressvpn_path, "get", "connectionstate"], timeout=10)
+                state = stdout.strip()
+                self.log(f"🔎 VPN Connection State: {state}")
+                if state == "Connected":
+                    # Get location too
+                    rc_loc, stdout_loc, stderr_loc = await self._run_command_async([self.expressvpn_path, "status"], timeout=10)
+                    output_loc = (stdout_loc + stderr_loc).lower()
+                    match = re.search(r"connected to (.+)", stdout_loc + stderr_loc, re.IGNORECASE)
+                    loc = match.group(1).strip() if match else "Connected"
+                    self.is_connected = True
+                    self.current_location = loc
+                    self.log(f"📍 VPN Location: {loc}")
+                    return True, loc
+                elif state in ["Connecting", "Reconnecting", "DisconnectingToReconnect"]:
+                    return False, "Connecting..."
+                else:
+                    self.is_connected = False
+                    self.current_location = None
+                    return False, "Not connected"
+
+            # Legacy/Standard parsing for expressvpn (v3)
             returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "status"], timeout=10)
-            
-            # Check both stdout and stderr (CLI might output to stderr)
             output = (stdout + stderr).lower()
             full_output = stdout + stderr
             
             # Check for elevation/permission errors
             if "error 740" in output or "requires elevation" in output or "administrator" in output:
-                # VPN is installed but needs admin rights
-                # Return a friendly message instead of error
                 return False, "Admin rights needed"
             
-            # Check for other common errors
-            if "error" in output and ("740" in full_output or "access denied" in output.lower()):
-                return False, "Access denied"
+            # Check for "connected to"
+            if "connected to" in output:
+                match = re.search(r"connected to (.+)", full_output, re.IGNORECASE)
+                if match:
+                    loc = match.group(1).strip()
+                    self.is_connected = True
+                    self.current_location = loc
+                    return True, loc
             
-            # Check for "not connected" FIRST - this is most reliable
+            # Check for "not connected"
             if "not connected" in output or "disconnected" in output:
                 self.is_connected = False
                 self.current_location = None
                 return False, "Not connected"
             
-            # Only consider connected if we explicitly see "Connected to [location]" with an actual location
-            # Don't trust returncode alone - ExpressVPN might return 0 even when not connected
-            lines = full_output.split('\n')
-            location = None
-            
-            for line in lines:
-                line_lower = line.lower()
-                # Look for explicit "Connected to" pattern with a location
-                if "connected to" in line_lower:
-                    # Extract location
-                    parts = line.split("Connected to", 1)
-                    if len(parts) > 1:
-                        location = parts[1].strip()
-                        # Make sure it's a real location (not empty, not just "connected", has some text)
-                        if location and len(location) > 2 and location.lower() != "connected":
-                            # Verify it's not an error message
-                            if "error" not in location.lower() and "not" not in location.lower():
-                                self.current_location = location
-                                self.is_connected = True
-                                return True, location
-                elif "connected:" in line_lower:
-                    # Alternative format: "Connected: [location]"
-                    parts = line.split("Connected:", 1)
-                    if len(parts) > 1:
-                        location = parts[1].strip()
-                        if location and len(location) > 2 and location.lower() != "connected":
-                            if "error" not in location.lower() and "not" not in location.lower():
-                                self.current_location = location
-                                self.is_connected = True
-                                return True, location
-            
-            # If we didn't find explicit "Connected to [location]", assume NOT connected
-            # This is safer - we only show connected if we're 100% sure
             self.is_connected = False
             self.current_location = None
             return False, "Not connected"
@@ -266,8 +322,13 @@ class ExpressVPNManager:
         if self.available_locations:
             return self.available_locations
         
+        is_ctl = "expressvpnctl" in self.expressvpn_path.lower()
+        
         try:
-            returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "list"], timeout=30)
+            if is_ctl:
+                returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "get", "regions"], timeout=30)
+            else:
+                returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "list"], timeout=30)
             
             locations = []
             lines = stdout.split('\n')
@@ -354,19 +415,25 @@ class ExpressVPNManager:
         Returns (success, message).
         """
         if not self.is_available():
-            return False, "ExpressVPN not found"
+            return False, "Not installed"
         
         try:
             # Check if logged in first
-            returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "status"], timeout=10)
-            login_output = (stdout + stderr).lower()
-            
-            # Check for common errors that indicate not logged in
-            if "not logged in" in login_output or "please log in" in login_output or "authentication" in login_output:
-                return False, "ExpressVPN not logged in. Please log in to ExpressVPN app first."
+            is_ctl = "expressvpnctl" in self.expressvpn_path.lower()
+            if is_ctl:
+                rc_login, stdout_login, stderr_login = await self._run_command_async([self.expressvpn_path, "get", "connectionstate"], timeout=10)
+                if "unauthorized" in (stdout_login + stderr_login).lower():
+                    return False, "ExpressVPN not logged in. Please log in to ExpressVPN app first."
+            else:
+                returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "status"], timeout=10)
+                login_output = (stdout + stderr).lower()
+                if "not logged in" in login_output or "please log in" in login_output or "authentication" in login_output:
+                    return False, "ExpressVPN not logged in. Please log in to ExpressVPN app first."
             
             # Disconnect first if connected
-            if self.is_connected:
+            # For expressvpnctl, we can just call connect and it will switch, but let's be safe
+            is_connected, _ = await self.get_status()
+            if is_connected:
                 await self.disconnect()
                 await asyncio.sleep(0.5)
             
@@ -452,19 +519,38 @@ class ExpressVPNManager:
             return False, f"Connection error: {str(e)[:50]}"
     
     async def disconnect(self) -> Tuple[bool, str]:
-        """Disconnect from VPN. Returns (success, message)."""
+        """Disconnect from VPN."""
         if not self.is_available():
-            return False, "ExpressVPN not found"
+            return False, "Not installed"
         
         try:
-            returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "disconnect"], timeout=15)
-            
-            await asyncio.sleep(1)
+            cmd = [self.expressvpn_path, "disconnect"]
+            returncode, stdout, stderr = await self._run_command_async(cmd, timeout=30)
             self.is_connected = False
             self.current_location = None
             return True, "Disconnected"
         except Exception as e:
-            return False, f"Disconnect error: {str(e)}"
+            return False, f"Disconnect failed: {str(e)}"
+
+    async def add_app_to_bypass(self, app_path: str) -> Tuple[bool, str]:
+        """
+        Add an application to the VPN bypass list (Split Tunneling).
+        Works only for expressvpnctl (v12).
+        """
+        if not self.is_available() or "expressvpnctl" not in self.expressvpn_path.lower():
+            return False, "Split tunneling CLI only supported in ExpressVPN v12+ on Mac."
+            
+        try:
+            # Enable split tunneling first
+            await self._run_command_async([self.expressvpn_path, "set", "splittunnel", "true"])
+            # Set to bypass
+            cmd = [self.expressvpn_path, "set", "split-app", f"bypass:{app_path}"]
+            rc, stdout, stderr = await self._run_command_async(cmd, timeout=10)
+            if rc == 0:
+                return True, f"Bypass added for {app_path}"
+            return False, f"Failed to add bypass: {stdout + stderr}"
+        except Exception as e:
+            return False, str(e)
     
     async def connect_random_location(self) -> Tuple[bool, str]:
         """Connect to a random available location."""

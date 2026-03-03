@@ -20,6 +20,11 @@ export default function SettingsPage() {
         vpn_enabled: true,
         vpn_rotate_per_batch: true,
         persistent_context: false,
+        proxy_enabled: false,
+        proxy_host: '',
+        proxy_port: '',
+        proxy_user: '',
+        proxy_pass: '',
     });
 
     useEffect(() => {
@@ -189,6 +194,42 @@ export default function SettingsPage() {
                             value={settings.vpn_enabled} onChange={v => update('vpn_enabled', v)} />
                         <Toggle label="Dynamic IP Rotation" sublabel="Automatically switch VPN locations per account batch"
                             value={settings.vpn_rotate_per_batch} onChange={v => update('vpn_rotate_per_batch', v)} />
+                    </Section>
+
+                    <Section title="Network Proxy" icon={<Globe className="w-4 h-4 text-rose-400" />}>
+                        <Toggle label="Enable Proxy" sublabel="Route traffic through a custom SOCKS/HTTP proxy"
+                            value={settings.proxy_enabled} onChange={v => update('proxy_enabled', v)} />
+
+                        {settings.proxy_enabled && (
+                            <div className="grid grid-cols-1 gap-4 pt-2 animate-in zoom-in-95 duration-200">
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div className="col-span-2">
+                                        <Field label="Proxy Host">
+                                            <input type="text" value={settings.proxy_host}
+                                                onChange={e => update('proxy_host', e.target.value)}
+                                                className="input-field-premium" placeholder="e.g. 192.168.1.1" />
+                                        </Field>
+                                    </div>
+                                    <Field label="Port">
+                                        <input type="text" value={settings.proxy_port}
+                                            onChange={e => update('proxy_port', e.target.value)}
+                                            className="input-field-premium" placeholder="8080" />
+                                    </Field>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <Field label="Username (Optional)">
+                                        <input type="text" value={settings.proxy_user}
+                                            onChange={e => update('proxy_user', e.target.value)}
+                                            className="input-field-premium" />
+                                    </Field>
+                                    <Field label="Password (Optional)">
+                                        <input type="password" value={settings.proxy_pass}
+                                            onChange={e => update('proxy_pass', e.target.value)}
+                                            className="input-field-premium" />
+                                    </Field>
+                                </div>
+                            </div>
+                        )}
                     </Section>
                 </div>
             </div>
