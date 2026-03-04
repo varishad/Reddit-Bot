@@ -10,15 +10,19 @@ def type_human(element: Locator, text: str) -> None:
     """
     Type with per-character delay to simulate human typing, 
     or use instant fill if configured.
+    Each keystroke gets a unique random delay for realistic variation.
     """
     if INSTANT_FILL_ENABLED:
         fill_instant(element, text)
         return
 
+    import time
     try:
-        delay = lambda: _random.uniform(HUMAN_TYPING_DELAY_MIN_MS, HUMAN_TYPING_DELAY_MAX_MS) / 1000.0
-        # Playwright element.type supports delay per char
-        element.type(text, delay=delay())
+        element.click()
+        for char in text:
+            delay = _random.uniform(HUMAN_TYPING_DELAY_MIN_MS, HUMAN_TYPING_DELAY_MAX_MS) / 1000.0
+            element.press(char)
+            time.sleep(delay)
     except Exception:
         try:
             element.fill(text)
