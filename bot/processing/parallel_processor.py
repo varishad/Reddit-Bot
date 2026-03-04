@@ -682,15 +682,12 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                     pass
                                 
                                 browser_w, context_w, page_w = None, None, None
-                                time.sleep(3.0)  # Simulated competitor browser boot overhead
                                 # Browser will be recreated at the start of next iteration
                             else:
                                 if status == 'invalid':
                                     engine.log(f"♻️  Worker [{worker_id}]: Keeping browser open for next account (invalid credentials - will reuse)")
-                                    time.sleep(1.0)  # Competitor 1s delay
                                 else:
                                     engine.log(f"♻️  Worker [{worker_id}]: Keeping browser open for next account (no restart needed)")
-                                    time.sleep(1.0)  # Competitor 1s delay
 
                             if engine.progress_callback:
                                 try:

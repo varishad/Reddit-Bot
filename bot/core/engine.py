@@ -390,7 +390,7 @@ class RedditBotEngine:
                 page.wait_for_load_state('domcontentloaded', timeout=5000)
             except Exception as e:
                 self.log(f"⚠️ Load state pause error: {str(e)}")
-            time.sleep(0.5)  # Reduced to 0.5s for faster processing
+            time.sleep(0.1)  # Minimal wait for DOM to settle
             
             try:
                 page.wait_for_selector('input[type="text"], input[name="username"], input[id*="username"]', timeout=5000)
@@ -431,7 +431,7 @@ class RedditBotEngine:
                     gentle_scroll_util(page)
                 except Exception as e:
                     self.log(f"⚠️ Post-submit humanization error: {str(e)}")
-            time.sleep(0.5)  # Reduced to 0.5s for faster detection
+            time.sleep(0.1)  # Minimal wait for DOM to settle
             
             # Detect status
             status, username, karma, error_msg = self.detect_status(page)
