@@ -1,5 +1,137 @@
 [
   {
+    "id": "2053e827-8e97-4285-a64a-5d023f2e789b",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "ryanalbert421@gmail.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:08:25.918114"
+  },
+  {
+    "id": "3f242f9f-4d2f-4be6-88ac-99602e3d56fc",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "musiclynn2020@gmail.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:08:24.524068"
+  },
+  {
+    "id": "c270e905-9da5-4e12-b023-8453f83677c2",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "jayce1271@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:08:19.591692"
+  },
+  {
+    "id": "a4f1fdac-04ea-491d-9eba-0d1596d29318",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "showe033@umn.edu",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:08:18.007319"
+  },
+  {
+    "id": "b10aa784-5689-4dea-9f0b-b18fd447e237",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "aafox313@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:07:23.102687"
+  },
+  {
+    "id": "3b1e02e3-5300-4590-8934-5568f6498af0",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "johnny5.0redbone@hotmail.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:07:21.878220"
+  },
+  {
+    "id": "467a607f-0de6-4b9a-8c60-fe373b855db1",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "debhenley@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:07:20.537029"
+  },
+  {
+    "id": "165ffa68-9f9e-4717-92c6-7317b026b29d",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "jolynenright@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:07:19.222842"
+  },
+  {
+    "id": "504a01e9-8c8c-4de0-a354-80ea0052bb05",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "wilsony@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:07:14.066180"
+  },
+  {
+    "id": "d0697780-d60a-4fe6-8dae-8e8de7a6e75d",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "adams081514@gmail.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:07:12.675566"
+  },
+  {
+    "id": "e6d1ab92-a85d-4c00-8e65-f3e166f79306",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "mblades3@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:07:11.242520"
+  },
+  {
+    "id": "4495eab7-f791-464b-af41-4ea1b327f80e",
+    "session_id": "01373cfc-3c3f-4dc4-bbb5-18fe99996d8c",
+    "email": "larncomp@yahoo.com",
+    "reddit_password": null,
+    "status": "invalid",
+    "username": null,
+    "karma": "Invalid email or password.",
+    "error_message": null,
+    "created_at": "2026-03-04T16:06:53.107994"
+  },
+  {
     "id": "103b883f-1c73-4055-9020-a575069e4c55",
     "session_id": "be61e975-20ef-4ca3-ad97-ab097581cd6a",
     "email": "jimbobsue@icloud.com",
