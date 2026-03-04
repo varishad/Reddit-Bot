@@ -51,7 +51,7 @@ class SessionManager:
         )
         try:
             self.engine.log(message)
-            vpn_manager.disconnect()
+            self.engine._run_async(vpn_manager.disconnect())
         except Exception:
             pass
 

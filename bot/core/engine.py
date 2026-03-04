@@ -5,7 +5,7 @@ import time
 from typing import Dict, List, Optional, Callable, Tuple
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from database import Database
-from config import DELAY_MIN, DELAY_MAX, BROWSER_TIMEOUT, HEADLESS, MAX_PARALLEL_BROWSERS, VPN_ENABLED, VPN_REQUIRE_CONNECTION, VPN_ROTATE_PER_BATCH, VPN_BLOCKED_COUNTRIES, VPN_BLOCK_IF_COUNTRY_MATCHES
+from config import DELAY_MIN, DELAY_MAX, BROWSER_TIMEOUT, HEADLESS, MAX_PARALLEL_BROWSERS, VPN_ENABLED, VPN_REQUIRE_CONNECTION, VPN_ROTATE_PER_BATCH, VPN_BLOCKED_COUNTRIES, VPN_BLOCK_IF_COUNTRY_MATCHES, VPN_LOCATION_LIST_FILE
 from ip_utils import get_ip_info
 from ip_utils import get_geo_profile
 import asyncio
@@ -92,10 +92,14 @@ class RedditBotEngine:
         self.session_manager.register_exit_handlers()
         self._active_browser_lock = threading.Lock()
         self._active_browser_contexts: List[Tuple[Optional[object], Optional[object]]] = []
+        self.active_browsers = 0
+        self.browser_status = "Waiting..."
 
     def _track_browser_context(self, browser, context):
         with self._active_browser_lock:
             self._active_browser_contexts.append((browser, context))
+            self.active_browsers = len(self._active_browser_contexts)
+            self.browser_status = f"Active Browsers: {self.active_browsers}"
 
     def _untrack_browser_context(self, browser, context):
         with self._active_browser_lock:
@@ -103,6 +107,11 @@ class RedditBotEngine:
                 pair for pair in self._active_browser_contexts
                 if pair[0] is not browser or pair[1] is not context
             ]
+            self.active_browsers = len(self._active_browser_contexts)
+            if self.active_browsers == 0:
+                self.browser_status = "All browsers closed"
+            else:
+                self.browser_status = f"Active Browsers: {self.active_browsers}"
 
     def close_all_active_contexts(self):
         with self._active_browser_lock:
@@ -118,10 +127,45 @@ class RedditBotEngine:
         """Log message using callback."""
         self.log_callback(message)
     
-    def stop(self):
+    def stop(self, hard: bool = False):
         """Stop the bot and disconnect VPN."""
+        self.should_stop = True
+        if hard:
+            self.log("🧨 [HARD STOP] Killing all browser processes...")
+            self.browser_status = "Hard Stopping..."
+        else:
+            self.log("🛑 Stop request received. Cleaning up...")
+            self.browser_status = "Stopping..."
+            
         self.session_manager.stop()
         self.close_all_active_contexts()
+        
+        if hard:
+            self.active_browsers = 0
+            self.browser_status = "All browsers killed"
+            self.log("✅ Hard stop completed.")
+    
+    def check_vpn_status(self) -> bool:
+        """
+        Check if VPN is connected. If not, stop the bot.
+        Returns True if VPN is connected or skipping check (rotation).
+        """
+        if not self.vpn_manager:
+            return True
+            
+        # Skip check if we're currently rotating the VPN
+        if getattr(self.vpn_manager, "is_rotating_vpn", False):
+            # self.log("🔄 [ENGINE] VPN rotation in progress, skipping status check")
+            return True
+            
+        is_connected, status = self._run_async(self.vpn_manager.get_status())
+        if not is_connected:
+            self.log(f"🚨 [ENGINE] VPN DISCONNECTED! Status: {status}")
+            self.log("🛑 [ENGINE] Stopping bot for security...")
+            self.stop()
+            return False
+            
+        return True
     
     def _close_context_browser(self, browser, context):
         """Close all pages, then context and browser safely."""
@@ -129,11 +173,22 @@ class RedditBotEngine:
         self._untrack_browser_context(browser, context)
     
     def _create_clean_page(self, context):
-        """Close any existing tabs and open a fresh one."""
+        """Reuse existing page if possible or open a fresh one."""
         try:
-            close_extra_pages_util(context, keep_first=False)
+            pages = context.pages
+            if pages:
+                # Close extra pages if more than one
+                if len(pages) > 1:
+                    for p in pages[1:]:
+                        try:
+                            p.close()
+                        except:
+                            pass
+                # Reuse the first one
+                return pages[0]
         except Exception as e:
-            self.log(f"⚠️ Error during clean page creation prep: {str(e)}")
+            self.log(f"⚠️ Error during clean page reuse: {str(e)}")
+        
         return context.new_page()
     
     def parse_credentials(self, file_path: str) -> List[tuple]:
@@ -156,30 +211,38 @@ class RedditBotEngine:
         return normalize_login_error_util(error_lower)
     
     def _run_async(self, coro):
-        """Run an async coroutine in a synchronous context safely."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # We are likely in a thread where we can't just run a new loop
-                # This is common in FastAPI background workers
-                import concurrent.futures
-                future = asyncio.run_coroutine_threadsafe(coro, loop)
-                return future.result()
-            else:
-                return loop.run_until_complete(coro)
-        except RuntimeError:
-            # No event loop in this thread
-            return asyncio.run(coro)
+        """Run an async coroutine in a synchronous context safely without interfering with Playwright's loop."""
+        import concurrent.futures
+        import threading
+        
+        def run_in_new_loop():
+            # Create a completely fresh event loop for this thread/task
+            # This avoids any interference from Playwright's event loop or FastAPI's main loop
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(coro)
+            finally:
+                new_loop.close()
 
-    def _launch_browser_and_context(self, playwright):
+        # Run the isolate loop in a fresh thread to avoid any current-thread loop conflicts
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_in_new_loop)
+            try:
+                return future.result(timeout=60)
+            except concurrent.futures.TimeoutError:
+                self.log(f"⚠️  [ENGINE] Async operation timed out after 60s")
+                raise TimeoutError("Async operation timed out")
+
+    def _launch_browser_and_context(self, playwright, profile_name: Optional[str] = None):
         """Launch a new browser and context using current configuration and geo profile."""
-        browser, context = self._run_async(launch_browser_and_context_util(playwright, log_callback=self.log))
+        browser, context = self._run_async(launch_browser_and_context_util(playwright, log_callback=self.log, profile_name=profile_name))
         self._track_browser_context(browser, context)
         return browser, context
 
-    def _launch_browser_and_context_sync(self, playwright):
+    def _launch_browser_and_context_sync(self, playwright, profile_name: Optional[str] = None):
         """Synchronous version of browser launch."""
-        browser, context = launch_browser_and_context_sync_util(playwright, log_callback=self.log)
+        browser, context = launch_browser_and_context_sync_util(playwright, log_callback=self.log, profile_name=profile_name)
         self._track_browser_context(browser, context)
         return browser, context
 
@@ -191,16 +254,21 @@ class RedditBotEngine:
             pass
         close_context_browser_sync_util(browser, context)
 
-    def login_to_reddit(self, email: str, password: str, playwright, first_attempt=True, reuse_context=None, reuse_page=None) -> Dict:
-        """Attempt to login to Reddit."""
+    def login_to_reddit(self, email: str, password: str, playwright, first_attempt=True, reuse_context=None, reuse_page=None, profile_name: Optional[str] = None) -> Dict:
+        """Attempt to login to Reddit. Use profile_name for persistent context isolation."""
         result = {
             "email": email,
             "password": password,
             "status": "error",
             "username": None,
             "karma": None,
-            "error_message": None
+            "error_message": None,
+            "timing": {}
         }
+        
+        timing = result["timing"]
+        account_start_time = time.time()
+        credential_input_time = None
         
         browser = None
         context = None
@@ -229,10 +297,9 @@ class RedditBotEngine:
                     page = self._create_clean_page(context)
                     self.log("✅ [ENGINE] New page created in reused browser")
             else:
-                self.log("⚠️ [ENGINE] WARNING: reuse_context is None - creating NEW browser (this should not happen in parallel mode!)")
-                self.log("🔧 [ENGINE] Opening new browser (not reusing)...")
-                browser, context = self._launch_browser_and_context_sync(playwright)
-                self.log("✅ [ENGINE] New browser opened")
+                self.log(f"🔧 [ENGINE] Opening browser for profile: {profile_name or 'Incognito'}...")
+                browser, context = self._launch_browser_and_context_sync(playwright, profile_name=profile_name)
+                self.log("✅ [ENGINE] Browser opened")
                 self.log("🔧 [ENGINE] Creating new page...")
                 page = self._create_clean_page(context)
                 self.log("✅ [ENGINE] New page created")
@@ -249,20 +316,25 @@ class RedditBotEngine:
             # If reusing page and we're already on login page with form visible, just clear fields
             if reuse_page:
                 try:
-                    if DIRECT_LOGIN_ENABLED:
+                    current_url = page.url
+                    # Zero-reload fast refresh logic matching competitor
+                    if "login" in current_url and is_form_visible_util(page):
+                        self.log("⚡ [ENGINE] Competitor Zero-Reload: Clearing fields without refreshing page.")
+                        try:
+                            context.clear_cookies()
+                        except Exception:
+                            pass
+                            
+                        # Instantly clear HTML input fields instead of network refresh
+                        if clear_form_fields_util(page, log_callback=self.log):
+                            time.sleep(0.3)
+                    elif DIRECT_LOGIN_ENABLED:
                         self.log("🚀 [ENGINE] Using DIRECT LOGIN navigation (Competitor style)")
                         try:
                             context.clear_cookies()
                         except Exception:
                             pass
                         page.goto(login_url, timeout=BROWSER_TIMEOUT)
-                    elif "login" in current_url:
-                        if is_form_visible_util(page):
-                            if clear_form_fields_util(page, log_callback=self.log):
-                                time.sleep(0.3)
-                        else:
-                            self.log("🌐 Loading Reddit login page...")
-                            self._navigate_via_address_bar(page, login_url, BROWSER_TIMEOUT)
                     else:
                         self.log("🌐 Loading Reddit login page...")
                         try:
@@ -325,6 +397,7 @@ class RedditBotEngine:
             except Exception as e:
                 self.log(f"⚠️ Input selector timeout: {str(e)}")
             
+            cred_input_start = time.time()
             # Fill email - using Reddit's new UI (faceplate-text-input) for faster detection
             email_field = fill_username_field_util(page, email, log_callback=self.log)
             
@@ -338,6 +411,9 @@ class RedditBotEngine:
             if not password_field:
                 result["error_message"] = "Could not find password field"
                 return result
+            
+            credential_input_time = time.time() - cred_input_start
+            timing["credential_input_seconds"] = round(credential_input_time, 3)
             
             # Submit form
             if not submit_form_util(page, password_field, log_callback=self.log):
@@ -460,6 +536,7 @@ class RedditBotEngine:
             else:
                 self.log("♻️  [ENGINE] Keeping browser/context open (reusing for next account)")
         
+        timing["total_account_seconds"] = round(time.time() - account_start_time, 3)
         return result
     
     def process_credentials(self, file_path: str, parallel_browsers: int = 1) -> List[Dict]:
@@ -546,6 +623,7 @@ class RedditBotEngine:
                     self.log("❌ VPN error occurred and connection is required. Aborting.")
                     return []
         
+        self.browser_status = "Launching..."
         if parallel_browsers == 1:
             results = process_accounts_sequential(self, credentials, file_path)
         else:

@@ -84,12 +84,12 @@ def perform_final_retries(engine, results: List[Dict]) -> List[Dict]:
                         max_candidates=int(VPN_LOCATION_MAX_TRIES_PER_ROTATION),
                     )
                     if success:
-                        time.sleep(2)
+                        time.sleep(0.5)  # Competitor speed mode
                         is_connected, vpn_location = engine.vpn_manager.get_status()
                         if is_connected:
                             engine.current_vpn_location = vpn_location
                             engine.log(f"  ✅ Connected to VPN: {vpn_location}")
-                            time.sleep(2)
+                            time.sleep(0.5)  # Competitor speed mode
 
                 try:
                     browser, context = engine._launch_browser_and_context_sync(playwright)

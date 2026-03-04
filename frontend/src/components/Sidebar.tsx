@@ -61,7 +61,7 @@ export function Sidebar() {
          */
         <aside
             className="fixed left-4 top-4 bottom-4 w-[230px] flex flex-col z-20 select-none rounded-[28px] shadow-[0_8px_32px_rgba(0,0,0,0.5)] border border-white/[0.04] overflow-hidden backdrop-blur-xl"
-            style={{ background: '#111827' }}
+            style={{ background: '#0d1424' }}
         >
             {/* Subtle top glow — gives premium depth like ExpressVPN */}
             <div

@@ -92,7 +92,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <main
               className="flex-1 ml-[262px] overflow-y-auto relative"
               style={{
-                background: '#111827',
+                background: '#0d1424',
                 minHeight: '100vh',
               }}
             >

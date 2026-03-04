@@ -80,6 +80,8 @@ export interface BotStatus {
     is_running: boolean;
     session_id: string | null;
     vpn_location?: string;
+    active_browsers?: number;
+    browser_status?: string;
     stats: BotStats;
     recent_logs: LogEntry[];
 }

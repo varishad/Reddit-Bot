@@ -8,7 +8,7 @@ from typing import List, Tuple, Dict
 
 from playwright.sync_api import sync_playwright
 
-from config import REUSE_BROWSER_FOR_BATCH
+from config import REUSE_BROWSER_FOR_BATCH, PERSISTENT_CONTEXT
 from bot.utils.browser_setup import ensure_playwright_browsers, install_playwright_browsers
 from ip_utils import get_ip_info
 from bot.browser.page_utils import get_or_create_page, close_extra_pages
@@ -154,9 +154,9 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                     
                     # Open browser once for this worker (will be reused for all accounts)
                     try:
-                        engine.log(f"🔧 Worker [{worker_id}]: Opening browser...")
+                        engine.log(f"🎬 [WORKER {worker_id}] Launching browser (Initial)...")
                         browser_w, context_w = engine._launch_browser_and_context_sync(playwright_worker)
-                        engine.log(f"✅ Worker [{worker_id}]: Browser opened successfully")
+                        engine.log(f"✅ [WORKER {worker_id}] Browser launch completed")
                         try:
                             engine.log(f"🔧 Worker [{worker_id}]: Creating/Getting page...")
                             page_w = get_or_create_page(context_w)
@@ -166,7 +166,14 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                             engine.log(f"⚠️  Worker [{worker_id}]: Failed to create page: {str(page_err)}")
                             page_w = None
                     except Exception as init_err:
-                        engine.log(f"⚠️  WORKER [{worker_id}] INIT ERROR: {str(init_err)}")
+                        err_msg = str(init_err)
+                        if "Executable doesn't exist" in err_msg or "executable_path" in err_msg:
+                            engine.log(f"❌ [WORKER {worker_id}] Playwright browser not found!")
+                            engine.log("💡 [FIX] Please run this in your terminal: python3 -m playwright install chromium")
+                            engine.browser_status = "Error: Browser Missing"
+                        else:
+                            engine.log(f"⚠️  [WORKER {worker_id}] Browser launch error: {err_msg}")
+                            engine.browser_status = "Error: Launch Failed"
                         return
 
                     # Work-Stealing Loop: Keep pulling accounts from queue until empty
@@ -175,6 +182,11 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                             engine.log(f"⏹️ Worker [{worker_id}]: Stop requested, exiting work-stealing loop")
                             # Immediately close browser on stop
                             close_worker_browser("stop requested")
+                            break
+                        
+                        # Check VPN status - if disconnected (and not rotating), stop the bot
+                        if not engine.check_vpn_status():
+                            close_worker_browser("VPN disconnected")
                             break
                         
                         # Get next account from queue (thread-safe)
@@ -203,22 +215,30 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                         accounts_processed += 1
                         
                         try:
-                            # Verify browser/context/page are still valid before reuse
-                            if context_w is None or page_w is None:
-                                engine.log(f"⚠️ Worker [{worker_id}]: Browser/context/page is None! Recreating...")
+                            # Verify browser/context/page are still valid before reuse 
+                            # (or force recreate if PERSISTENT_CONTEXT is enabled for isolation)
+                            if context_w is None or page_w is None or PERSISTENT_CONTEXT:
+                                if PERSISTENT_CONTEXT and context_w is not None:
+                                    engine.log(f"🔄 Worker [{worker_id}]: Switching profile context to {email}...")
+                                    close_worker_browser("profile switch")
+                                
+                                engine.log(f"🎬 [WORKER {worker_id}] Launching browser (Profile: {email if PERSISTENT_CONTEXT else 'Incognito'})...")
                                 try:
-                                    if browser_w:
-                                        try:
-                                            browser_w.close()
-                                        except:
-                                            pass
-                                except:
-                                    pass
-                                engine.log(f"🔧 Worker [{worker_id}]: Opening browser due to None context/page...")
-                                browser_w, context_w = engine._launch_browser_and_context_sync(playwright_worker)
-                                page_w = get_or_create_page(context_w)
-                                close_extra_pages(context_w, keep_first=True)
-                                engine.log(f"✅ Worker [{worker_id}]: Browser recreated")
+                                    self_profile_name = email if PERSISTENT_CONTEXT else None
+                                    browser_w, context_w = engine._launch_browser_and_context_sync(playwright_worker, profile_name=self_profile_name)
+                                    engine.log(f"✅ [WORKER {worker_id}] Browser launch completed")
+                                    page_w = get_or_create_page(context_w)
+                                    close_extra_pages(context_w, keep_first=True)
+                                    engine.log(f"✅ [WORKER {worker_id}] Page ready")
+                                except Exception as rec_err:
+                                    # ... error handling ... (existing logic below)
+                                    err_msg = str(rec_err)
+                                    if "Executable doesn't exist" in err_msg or "executable_path" in err_msg:
+                                        engine.log(f"❌ [WORKER {worker_id}] Playwright browser not found during recreate!")
+                                        engine.log("💡 [FIX] Please run this in your terminal: python3 -m playwright install chromium")
+                                    else:
+                                        engine.log(f"❌ [WORKER {worker_id}] Recreate launch error: {err_msg}")
+                                    break # Exit worker if recreate fails
                             
                             # Check stop before calling login_to_reddit (long operation)
                             if engine.should_stop:
@@ -228,7 +248,13 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                     work_queue.insert(0, account_data)
                                 break
                             
+                            # Initialize variables that might be referenced if IP fetching is skipped
+                            ip = ""
+                            country = ""
+                            location = ""
+                            
                             engine.log(f"🔍 Worker [{worker_id}]: Calling login_to_reddit for account {index} with reuse_context={'VALID' if context_w else 'None'}, reuse_page={'VALID' if page_w else 'None'}")
+                            engine.browser_status = f"W[{worker_id}] > {email}"
                             result = engine.login_to_reddit(
                                 email,
                                 password,
@@ -236,6 +262,7 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                 first_attempt=False,
                                 reuse_context=context_w,
                                 reuse_page=page_w,
+                                profile_name=email if PERSISTENT_CONTEXT else None
                             )
                             
                             # Check stop after login_to_reddit (may have taken time)
@@ -655,12 +682,15 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                     pass
                                 
                                 browser_w, context_w, page_w = None, None, None
+                                time.sleep(3.0)  # Simulated competitor browser boot overhead
                                 # Browser will be recreated at the start of next iteration
                             else:
                                 if status == 'invalid':
                                     engine.log(f"♻️  Worker [{worker_id}]: Keeping browser open for next account (invalid credentials - will reuse)")
+                                    time.sleep(1.0)  # Competitor 1s delay
                                 else:
                                     engine.log(f"♻️  Worker [{worker_id}]: Keeping browser open for next account (no restart needed)")
+                                    time.sleep(1.0)  # Competitor 1s delay
 
                             if engine.progress_callback:
                                 try:

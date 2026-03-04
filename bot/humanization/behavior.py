@@ -7,28 +7,48 @@ from playwright.sync_api import Page
 from config import HUMAN_STEP_WAIT_MIN_S, HUMAN_STEP_WAIT_MAX_S
 
 
-def human_pause() -> None:
-    """Small random pause between steps."""
+def human_pause(natural: bool = True) -> None:
+    """Small random pause between steps. If natural=True, uses a Gaussian distribution."""
     try:
-        time.sleep(_random.uniform(HUMAN_STEP_WAIT_MIN_S, HUMAN_STEP_WAIT_MAX_S))
+        if natural:
+            # Gaussian (Normal) distribution mirrors human hesitation better
+            # centered between min and max
+            mu = (HUMAN_STEP_WAIT_MIN_S + HUMAN_STEP_WAIT_MAX_S) / 2
+            sigma = (HUMAN_STEP_WAIT_MAX_S - HUMAN_STEP_WAIT_MIN_S) / 4
+            wait = _random.gauss(mu, sigma)
+            # Boundary clamp
+            wait = max(HUMAN_STEP_WAIT_MIN_S, min(wait, HUMAN_STEP_WAIT_MAX_S))
+            time.sleep(wait)
+        else:
+            time.sleep(_random.uniform(HUMAN_STEP_WAIT_MIN_S, HUMAN_STEP_WAIT_MAX_S))
     except Exception:
         pass
 
 
 def mouse_jitter(page: Page) -> None:
     """
-    Perform small random mouse movements to simulate human presence.
+    Perform realistic random mouse movements across the viewport to simulate human presence.
     
     Args:
         page: Playwright page object
     """
     try:
-        # More realistic mouse movements - multiple small movements
-        for _ in range(_random.randint(2, 4)):
-            x = _random.randint(50, 300)
-            y = _random.randint(50, 300)
-            page.mouse.move(x, y, steps=_random.randint(5, 15))
-            time.sleep(_random.uniform(0.1, 0.3))
+        viewport = page.viewport_size or {'width': 1280, 'height': 720}
+        width = viewport['width']
+        height = viewport['height']
+
+        # Industrial Grade: Randomize across full viewport
+        for _ in range(_random.randint(2, 5)):
+            x = _random.randint(10, width - 10)
+            y = _random.randint(10, height - 10)
+            
+            # Vary steps and speed for each movement
+            steps = _random.randint(10, 40)
+            page.mouse.move(x, y, steps=steps)
+            
+            # Natural micro-pause after movement
+            if _random.random() > 0.7:
+                time.sleep(_random.uniform(0.1, 0.4))
     except Exception:
         pass
 

@@ -35,12 +35,20 @@ class ExpressVPNManager:
         self.available_locations = []
         self.current_location = None
         self.is_connected = False
+        # Rotation tracking to prevent bot auto-stop
+        self.is_rotating_vpn = False
         # Custom location tracking
         self.custom_locations_file = None
         self.custom_locations = []
         # Smart selection memory
         self._location_last_used: Dict[str, float] = {}
-        self._location_score: Dict[str, float] = {}  # higher is better (success bias)
+        # Higher is better (success bias)
+        self._location_score: Dict[str, float] = {}
+        
+        # Status caching to prevent CLI spam
+        self._last_status_check = 0.0
+        self._cached_status = (False, None)
+        self._status_cache_ttl = 5.0  # 5 seconds
         
         # Find ExpressVPN installation
         self._find_expressvpn()
@@ -100,6 +108,7 @@ class ExpressVPNManager:
 
         if self.expressvpn_path:
             try:
+                # Command-level verification
                 result = subprocess.run(
                     [self.expressvpn_path, "status"],
                     capture_output=True,
@@ -113,11 +122,20 @@ class ExpressVPNManager:
         else:
             if diag["is_mac"]:
                 if is_ios_version:
-                    diag["error_hint"] = "You still have the 'App Store' version. Please DELETE it and download the 'Official Mac version' from expressvpn.com/vpn-software/vpn-mac"
+                    msg = "❌ [VPN] 'App Store' version detected. This version CANNOT be controlled by the bot."
+                    self.log(msg)
+                    self.log("💡 [FIX] Please DELETE it and download the 'Official Mac version' from: expressvpn.com/vpn-software/vpn-mac")
+                    diag["error_hint"] = msg
                 elif is_official_mac:
-                    diag["error_hint"] = "Official ExpressVPN found, but CLI is missing. Try restarting your Mac or running 'defaults write com.expressvpn.expressvpn.cli InstallCLI -bool true' in Terminal if you know how."
+                    msg = "⚠️ [VPN] Official App found but CLI is missing."
+                    self.log(msg)
+                    self.log("💡 [FIX] Try running this in Terminal: defaults write com.expressvpn.expressvpn.cli InstallCLI -bool true")
+                    diag["error_hint"] = msg
                 else:
-                    diag["error_hint"] = "ExpressVPN app found, but CLI tools are missing. Please ensure you downloaded the version from expressvpn.com (not the App Store)."
+                    msg = "❌ [VPN] CLI tools missing."
+                    self.log(msg)
+                    self.log("💡 [FIX] Please ensure you downloaded ExpressVPN from expressvpn.com (not the App Store).")
+                    diag["error_hint"] = msg
             else:
                 diag["error_hint"] = "ExpressVPN not found. Please install it to use VPN features."
         
@@ -251,6 +269,24 @@ class ExpressVPNManager:
                 pass
             return -1, "", "Timeout"
 
+    async def _activate_daemon(self) -> bool:
+        """Specifically for macOS/expressvpnctl: Enable background mode."""
+        if not self.expressvpn_path or "expressvpnctl" not in self.expressvpn_path.lower():
+            return False
+            
+        try:
+            self.log("🔧 [VPN] Attempting to activate ExpressVPN daemon (background enable)...")
+            rc, stdout, stderr = await self._run_command_async([self.expressvpn_path, "background", "enable"], timeout=15)
+            if rc == 0:
+                self.log("✅ [VPN] Daemon background mode enabled successfully.")
+                return True
+            else:
+                self.log(f"⚠️ [VPN] Failed to enable daemon background mode (RC: {rc}): {stdout + stderr}")
+                return False
+        except Exception as e:
+            self.log(f"❌ [VPN] Error activating daemon: {str(e)}")
+            return False
+
     async def ensure_app_running(self) -> bool:
         """Attempt to open the ExpressVPN GUI app depending on the OS."""
         try:
@@ -297,34 +333,45 @@ class ExpressVPNManager:
         """Check if ExpressVPN is available."""
         return self.expressvpn_path is not None
     
-    async def get_status(self) -> Tuple[bool, Optional[str]]:
+    async def get_status(self, force: bool = False) -> Tuple[bool, Optional[str]]:
         """Get current VPN status. Returns (is_connected, location_or_error)."""
         if not self.is_available():
             return False, "Not installed"
         
+        # Return cached status if recent enough
+        now = time.time()
+        if not force and (now - self._last_status_check < self._status_cache_ttl):
+            return self._cached_status
+
         is_ctl = "expressvpnctl" in self.expressvpn_path.lower()
         
         try:
             # For v12 (expressvpnctl), we can get precise connection state
             if is_ctl:
-                rc, stdout, stderr = await self._run_command_async([self.expressvpn_path, "get", "connectionstate"], timeout=15)
+                rc, stdout, stderr = await self._run_command_async([self.expressvpn_path, "get", "connectionstate"], timeout=10)
                 state = stdout.strip()
+                result = (False, "Not connected")
+                
                 if state == "Connected":
                     # Get location too
-                    rc_loc, stdout_loc, stderr_loc = await self._run_command_async([self.expressvpn_path, "status"], timeout=15)
+                    rc_loc, stdout_loc, stderr_loc = await self._run_command_async([self.expressvpn_path, "status"], timeout=10)
                     output_loc = (stdout_loc + stderr_loc).lower()
                     match = re.search(r"connected to (.+)", stdout_loc + stderr_loc, re.IGNORECASE)
                     loc = match.group(1).strip() if match else "Connected"
                     self.is_connected = True
                     self.current_location = loc
                     self.log(f"📍 VPN Location: {loc}")
-                    return True, loc
+                    result = (True, loc)
                 elif state in ["Connecting", "Reconnecting", "DisconnectingToReconnect"]:
-                    return False, "Connecting..."
+                    result = (False, "Connecting...")
                 else:
                     self.is_connected = False
                     self.current_location = None
-                    return False, "Not connected"
+                    result = (False, "Not connected")
+                
+                self._cached_status = result
+                self._last_status_check = now
+                return result
 
             # Legacy/Standard parsing for expressvpn (v3)
             returncode, stdout, stderr = await self._run_command_async([self.expressvpn_path, "status"], timeout=10)
@@ -421,39 +468,41 @@ class ExpressVPNManager:
                         if location not in locations:
                             locations.append(location)
             
-            # Also try "list all" for more locations
-            try:
-                returncode2, stdout2, stderr2 = await self._run_command_async([self.expressvpn_path, "list", "all"], timeout=30)
-                lines2 = stdout2.split('\n')
-                for line in lines2:
-                    line = line.strip()
-                    # Skip headers and separators
-                    if not line or line.startswith('-') or line.lower().startswith('location') or len(line) < 3:
-                        continue
-                    
-                    # Parse location format
-                    location = line
-                    if ' - ' in location:
-                        location = location.split(' - ')[-1].strip()
-                    
-                    # Remove trailing numbers and extra spaces
-                    location = re.sub(r'\s+\d+\s*$', '', location).strip()
-                    location = re.sub(r'\s+', ' ', location)
-                    
-                    if location and len(location) > 2 and not location.isdigit():
-                        if ' - ' in line:
-                            alias = line.split(' - ')[0].strip()
-                            alias = re.sub(r'\s+\d+\s*$', '', alias).strip()
-                            if alias and len(alias) > 2:
-                                if alias not in locations:
-                                    locations.append(alias)
-                            elif location not in locations:
-                                locations.append(location)
-                        else:
-                            if location not in locations:
-                                locations.append(location)
-            except:
-                pass
+            # Also try "list all" for more locations if we have few
+            if len(locations) < 10:
+                try:
+                    self.log("📋 [VPN] Fetching full locations list ('list all')...")
+                    returncode2, stdout2, stderr2 = await self._run_command_async([self.expressvpn_path, "list", "all"], timeout=30)
+                    lines2 = stdout2.split('\n')
+                    for line in lines2:
+                        line = line.strip()
+                        # Skip headers and separators
+                        if not line or line.startswith('-') or line.lower().startswith('location') or len(line) < 3:
+                            continue
+                        
+                        # Parse location format
+                        location = line
+                        if ' - ' in location:
+                            location = location.split(' - ')[-1].strip()
+                        
+                        # Remove trailing numbers and extra spaces
+                        location = re.sub(r'\s+\d+\s*$', '', location).strip()
+                        location = re.sub(r'\s+', ' ', location)
+                        
+                        if location and len(location) > 2 and not location.isdigit():
+                            if ' - ' in line:
+                                alias = line.split(' - ')[0].strip()
+                                alias = re.sub(r'\s+\d+\s*$', '', alias).strip()
+                                if alias and len(alias) > 2:
+                                    if alias not in locations:
+                                        locations.append(alias)
+                                elif location not in locations:
+                                    locations.append(location)
+                            else:
+                                if location not in locations:
+                                    locations.append(location)
+                except:
+                    pass
             
             self.available_locations = locations
             return locations
@@ -505,6 +554,23 @@ class ExpressVPNManager:
             # Connect to location
             returncode, stdout, stderr = await self._run_command_async(cmd, timeout=90)
             
+            # Handle specific v12 error: daemon not active
+            output = (stdout + stderr).lower()
+            if "activate the daemon" in output or "background enable" in output:
+                self.log("🔄 [VPN] Inactive daemon detected. Attempting recovery...")
+                daemon_ok = await self._activate_daemon()
+                app_ok = await self.ensure_app_running()
+                
+                if daemon_ok or app_ok:
+                    self.log("⏳ [VPN] Waiting for ExpressVPN to stabilize (8s)...")
+                    await asyncio.sleep(8)
+                    # Retry connection
+                    self.log(f"🔄 [VPN] Retrying connection to: {location or 'smart'}...")
+                    returncode, stdout, stderr = await self._run_command_async(cmd, timeout=90)
+                    output = (stdout + stderr).lower()
+                else:
+                    return False, "Failed to activate ExpressVPN daemon. Please start the app manually."
+
             if returncode != 0:
                 self.log(f"❌ [VPN] Connect command failed (RC: {returncode}). Error: {stderr or stdout}")
             
@@ -526,10 +592,23 @@ class ExpressVPNManager:
                     return False, "Failed to connect to smart location."
             
             # Check if connection command shows success
+            # Note: expressvpnctl (v12) connect is often silent on success
+            if is_ctl and returncode == 0:
+                self.log("✅ Expressvpnctl connection initiated successfully (silent).")
+                # Wait for connection to establish, polling up to 4 times
+                for _ in range(4):
+                    await asyncio.sleep(1.5)
+                    is_connected, status_msg = await self.get_status()
+                    if is_connected:
+                        return True, status_msg
+                    self.log(f"Connection pending... ({status_msg})")
+                
+                return False, f"Connection initiated but status check failed: {status_msg}"
+
             if "connected" in output.lower() or "connecting" in output.lower():
                 # Wait for connection to establish
                 self.log("Waiting for connection to establish...")
-                await asyncio.sleep(3)
+                await asyncio.sleep(1.5)  # Reduced from 3s for competitor speed matching
                 
                 # Verify connection using get_status()
                 is_connected, status_msg = await self.get_status()
@@ -541,7 +620,7 @@ class ExpressVPNManager:
                 else:
                     # Connection might still be establishing, try one more time
                     self.log("Connection not verified yet, waiting a bit more...")
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(1)  # Reduced from 2s
                     is_connected, status_msg = await self.get_status()
                     
                     if is_connected:
@@ -561,9 +640,10 @@ class ExpressVPNManager:
                             return False, f"Connection status unclear. Location: {location_from_output}, but status check failed. Try checking ExpressVPN app manually."
                         else:
                             return False, f"Connection failed: {status_msg}. Check ExpressVPN app or run as Administrator."
-                # No connection message in output
-                error_msg = stderr or stdout or "Unknown error"
-                return False, f"Connection failed: {error_msg[:100]}"
+            
+            # No connection message in output
+            error_msg = stderr or stdout or "Unknown error"
+            return False, f"Connection failed: {error_msg[:100]}"
                 
         except subprocess.TimeoutExpired:
             return False, "Connection timeout. ExpressVPN may be slow to respond."
@@ -608,60 +688,73 @@ class ExpressVPNManager:
             return False, str(e)
     
     async def connect_random_location(self) -> Tuple[bool, str]:
-        """Connect to a random available location."""
-        self.log("🎲 [VPN] Selecting a random location...")
-        locations = await self.list_locations()
-        if not locations:
-            self.log("⚠️ [VPN] No locations found, trying smart location...")
-            # Try smart location if list fails
-            return await self.connect(None)
-        
-        # Filter out current location if connected
-        available = [loc for loc in locations if loc != self.current_location]
-        if not available:
-            available = locations
-        
-        location = random.choice(available)
-        self.log(f"📍 [VPN] Randomly selected: {location}")
-        return await self.connect(location)
+        """Connect to a random available location, prioritizing smart location on first start."""
+        self.is_rotating_vpn = True
+        try:
+            # If we're not connected and it's the first run, go to Smart Location
+            is_connected, _ = await self.get_status()
+            if not is_connected and not self.current_location:
+                self.log("🚀 [VPN] Initial run: prioritizing Smart Location for fast handshake...")
+                return await self.connect(None)
+
+            self.log("🎲 [VPN] Selecting a random high-quality location...")
+            locations = await self.list_locations()
+            if not locations:
+                self.log("⚠️ [VPN] No locations found, trying smart location...")
+                return await self.connect(None)
+            
+            # Filter out current location
+            available = [loc for loc in locations if loc != self.current_location]
+            if not available:
+                available = locations
+            
+            location = random.choice(available)
+            self.log(f"📍 [VPN] Randomly selected: {location}")
+            return await self.connect(location)
+        finally:
+            self.is_rotating_vpn = False
     
     async def rotate_location(self) -> Tuple[bool, str]:
         """Rotate to a new VPN location (disconnect and connect to new one)."""
-        # First, get current status to see if we're connected
-        current_status, _ = await self.get_status()
-        
-        locations = await self.list_locations()
-        if not locations:
-            # Try smart location
-            return await self.connect(None)
-        
-        # Get a different location (avoid current one)
-        available = [loc for loc in locations if loc != self.current_location]
-        if not available:
-            available = locations
-        
-        # Clean location names
-        cleaned_available = []
-        for loc in available:
-            # Remove trailing numbers and extra spaces
-            cleaned = re.sub(r'\s+\d+\s*$', '', loc).strip()
-            cleaned = re.sub(r'\s+', ' ', cleaned)
-            if cleaned and len(cleaned) > 2:
-                cleaned_available.append(cleaned)
-        
-        if not cleaned_available:
-            cleaned_available = available
-        
-        new_location = random.choice(cleaned_available)
-        self.log(f"Selected location: {new_location}")
-        
-        # If already connected, disconnect first
-        if current_status:
-            await self.disconnect()
-            await asyncio.sleep(2)
-        
-        # Connect to new location
-        return await self.connect(new_location)
+        self.is_rotating_vpn = True
+        try:
+            # First, get current status to see if we're connected
+            current_status, _ = await self.get_status()
+            
+            locations = await self.list_locations()
+            if not locations:
+                # Try smart location
+                return await self.connect(None)
+            
+            # Get a different location (avoid current one)
+            available = [loc for loc in locations if loc != self.current_location]
+            if not available:
+                available = locations
+            
+            # Clean location names
+            cleaned_available = []
+            for loc in available:
+                # Remove trailing numbers and extra spaces
+                cleaned = re.sub(r'\s+\d+\s*$', '', loc).strip()
+                cleaned = re.sub(r'\s+', ' ', cleaned)
+                if cleaned and len(cleaned) > 2:
+                    cleaned_available.append(cleaned)
+            
+            if not cleaned_available:
+                cleaned_available = available
+            
+            new_location = random.choice(cleaned_available)
+            self.log(f"Selected location: {new_location}")
+            
+            # If already connected, disconnect first
+            if current_status:
+                await self.disconnect()
+                await asyncio.sleep(2)
+            
+            # Connect to new location
+            return await self.connect(new_location)
+        finally:
+            self.is_rotating_vpn = False
 
     def _filter_locations(self, locations: List[str], preferred: List[str], avoid: List[str]) -> List[str]:
         if not locations:
@@ -681,42 +774,46 @@ class ExpressVPNManager:
         """
         Connect to a location using cooldown and success-based scoring.
         """
-        locations = await self.list_locations()
-        if not locations:
-            return await self.connect(None)
-        candidates = self._filter_locations(locations, preferred or [], avoid or [])
-        now = time.time()
-        # Exclude cooldowned locations
-        def not_on_cooldown(loc: str) -> bool:
-            last = self._location_last_used.get(loc)
-            return (last is None) or ((now - last) >= cooldown_seconds)
-        candidates = [c for c in candidates if not_on_cooldown(c)]
-        if not candidates:
+        self.is_rotating_vpn = True
+        try:
+            locations = await self.list_locations()
+            if not locations:
+                return await self.connect(None)
             candidates = self._filter_locations(locations, preferred or [], avoid or [])
-        # Score sort
-        def score(loc: str) -> float:
-            return self._location_score.get(loc, 0.0)
-        candidates.sort(key=score, reverse=True)
-        # Try top-N random shuffle
-        if candidates:
-            top_slice = candidates[:max_candidates]
-            random.shuffle(top_slice)
-        else:
-            top_slice = []
-        # Try to connect
-        tried = 0
-        for loc in top_slice or locations:
-            tried += 1
-            ok, msg = await self.connect(loc)
-            if ok:
-                self._location_last_used[loc] = time.time()
-                # Small positive reinforcement
-                self._location_score[loc] = self._location_score.get(loc, 0.0) + 1.0
-                return ok, msg
+            now = time.time()
+            # Exclude cooldowned locations
+            def not_on_cooldown(loc: str) -> bool:
+                last = self._location_last_used.get(loc)
+                return (last is None) or ((now - last) >= cooldown_seconds)
+            candidates = [c for c in candidates if not_on_cooldown(c)]
+            if not candidates:
+                candidates = self._filter_locations(locations, preferred or [], avoid or [])
+            # Score sort
+            def score(loc: str) -> float:
+                return self._location_score.get(loc, 0.0)
+            candidates.sort(key=score, reverse=True)
+            # Try top-N random shuffle
+            if candidates:
+                top_slice = candidates[:max_candidates]
+                random.shuffle(top_slice)
             else:
-                # Small penalty
-                self._location_score[loc] = self._location_score.get(loc, 0.0) - 0.2
-            if tried >= max_candidates:
-                break
-        # Fallback to smart
-        return await self.connect(None)
+                top_slice = []
+            # Try to connect
+            tried = 0
+            for loc in top_slice or locations:
+                tried += 1
+                ok, msg = await self.connect(loc)
+                if ok:
+                    self._location_last_used[loc] = time.time()
+                    # Small positive reinforcement
+                    self._location_score[loc] = self._location_score.get(loc, 0.0) + 1.0
+                    return ok, msg
+                else:
+                    # Small penalty
+                    self._location_score[loc] = self._location_score.get(loc, 0.0) - 0.2
+                if tried >= max_candidates:
+                    break
+            # Fallback to smart
+            return await self.connect(None)
+        finally:
+            self.is_rotating_vpn = False

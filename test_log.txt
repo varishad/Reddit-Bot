@@ -1,0 +1,20 @@
+/Users/mdrishadrahman/Documents/Coding/Github/Reddit-Bot/server.py:88: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+2026-03-04 21:22:09,975 - RedditBot - INFO - [server.py:220] - Initializing AppState...
+2026-03-04 21:22:10,093 - RedditBot - INFO - [server.py:56] - 🔍 [VPN] Searching for ExpressVPN executable...
+2026-03-04 21:22:10,094 - RedditBot - INFO - [server.py:56] - ✅ Found ExpressVPN at: /Applications/ExpressVPN.app/Contents/MacOS/expressvpnctl
+2026-03-04 21:22:10,094 - RedditBot - INFO - [server.py:56] - 🚀 Trusting path on macOS without command test
+2026-03-04 21:22:10,094 - RedditBot - INFO - [server.py:298] - ✅ Global AppState created successfully
+INFO:     Started server process [19865]
+INFO:     Waiting for application startup.
+2026-03-04 21:22:10,150 - RedditBot - INFO - [server.py:91] - Application starting up...
+2026-03-04 21:22:10,150 - RedditBot - INFO - [server.py:56] - ⚡ [VPN] Executing: /Applications/ExpressVPN.app/Contents/MacOS/expressvpnctl get connectionstate (Timeout: 10s)
+INFO:     Application startup complete.
+ERROR:    [Errno 48] error while attempting to bind on address ('0.0.0.0', 8000): [errno 48] address already in use
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
