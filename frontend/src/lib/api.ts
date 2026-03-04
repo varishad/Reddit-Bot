@@ -84,6 +84,15 @@ export interface BotStatus {
     recent_logs: LogEntry[];
 }
 
+export interface VPNDiagnostic {
+    os: string;
+    exe_found: boolean;
+    exe_path: string | null;
+    is_mac: boolean;
+    cli_accessible: boolean;
+    error_hint: string | null;
+}
+
 // ─── API surface ────────────────────────────────────────────────────────────
 export const botApi = {
     health: () => api.get('/health'),
@@ -122,6 +131,7 @@ export const botApi = {
     results: () => api.get('/accounts/results'),
     status: (): Promise<{ data: BotStatus }> => api.get('/bot/status'),
     logs: (): Promise<{ data: LogEntry[] }> => api.get('/bot/full-logs'),
+    vpnDiag: (): Promise<{ data: VPNDiagnostic }> => api.get('/vpn/diag'),
 
     // Admin
     getUsers: () => api.get('/admin/users'),

@@ -95,7 +95,7 @@ class RedditBotEngine:
             self._active_browser_contexts.clear()
         for browser, context in contexts:
             try:
-                close_context_browser_util(browser, context)
+                self._run_async(close_context_browser_util(browser, context))
             except Exception as e:
                 self.log(f"⚠️ Error closing browser context: {str(e)}")
     
@@ -110,7 +110,7 @@ class RedditBotEngine:
     
     def _close_context_browser(self, browser, context):
         """Close all pages, then context and browser safely."""
-        close_context_browser_util(browser, context)
+        self._run_async(close_context_browser_util(browser, context))
         self._untrack_browser_context(browser, context)
     
     def _create_clean_page(self, context):
@@ -163,7 +163,7 @@ class RedditBotEngine:
 
     def _launch_browser_and_context(self, playwright):
         """Launch a new browser and context using current configuration and geo profile."""
-        browser, context = launch_browser_and_context_util(playwright, log_callback=self.log)
+        browser, context = self._run_async(launch_browser_and_context_util(playwright, log_callback=self.log))
         self._track_browser_context(browser, context)
         return browser, context
 
@@ -447,7 +447,7 @@ class RedditBotEngine:
                             self.log(f"✅ [ENGINE] VPN Auto-connected: {msg}")
                         elif VPN_REQUIRE_CONNECTION:
                             self.log(f"❌ [ENGINE] VPN connection required but auto-connect failed: {msg}. Aborting.")
-                            return []
+                            raise RuntimeError(f"VPN connection required but failed: {msg}")
                         else:
                             self.log(f"⚠️  [ENGINE] VPN auto-connect failed: {msg}. Continuing as per config.")
                 else:
