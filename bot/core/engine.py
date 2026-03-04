@@ -432,8 +432,19 @@ class RedditBotEngine:
                 except Exception as e:
                     self.log(f"⚠️ Post-submit humanization error: {str(e)}")
             
-            # Detect status
             status, username, karma, error_msg = self.detect_status(page)
+            
+            # --- AUTOMATED RECOVERY: Security Block Reload ---
+            if status == "security_block":
+                self.log("🛡️ [RECOVERY] Security Block detected. Attempting automated reload...")
+                try:
+                    page.reload(wait_until="domcontentloaded", timeout=10000)
+                    time.sleep(2)
+                    status, username, karma, error_msg = self.detect_status(page)
+                    self.log(f"🛡️ [RECOVERY] Post-reload status: {status}")
+                except Exception as e:
+                    self.log(f"⚠️ [RECOVERY] Reload failed: {str(e)}")
+            
             result["status"] = status
             result["username"] = username
             result["karma"] = karma
@@ -538,12 +549,24 @@ class RedditBotEngine:
         timing["total_account_seconds"] = round(time.time() - account_start_time, 3)
         return result
     
-    def process_credentials(self, file_path: str, parallel_browsers: int = 1) -> List[Dict]:
-        """Process all credentials from file with optional parallel processing."""
-        credentials = self.parse_credentials(file_path)
+    def process_credentials(self, file_path: Optional[str] = None, parallel_browsers: int = 1, batch_limit: int = 100, include_statuses: List[str] = ["pending", "error"]) -> List[Dict]:
+        """Process all credentials from file or Supabase with optional parallel processing."""
+        credentials = []
         
+        # 1. INDUSTRIAL PRIORITY: Check Database first if we have a user
+        if self.db.current_user_id:
+            db_accounts = self.db.get_accounts_to_process(limit=batch_limit, include_statuses=include_statuses)
+            if db_accounts:
+                self.log(f"📦 [INDUSTRIAL] Fetched {len(db_accounts)} accounts from Supabase Master List (Filter: {', '.join(include_statuses)})")
+                credentials = [(acc['email'], acc.get('password')) for acc in db_accounts]
+        
+        # 2. FALLBACK: Check local file only if DB is empty or explicitly requested
+        if not credentials and file_path and os.path.exists(file_path):
+            self.log(f"📂 [FALLBACK] Loading credentials from {file_path}")
+            credentials = self.parse_credentials(file_path)
+
         if not credentials:
-            self.log("No valid credentials found")
+            self.log("No valid credentials found (checked local file and database)")
             return []
         
         self.log(f"Found {len(credentials)} credential(s) to process")

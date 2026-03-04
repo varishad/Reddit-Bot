@@ -24,7 +24,7 @@ export function StatCard({ label, value, icon, color = 'default', subtitle }: St
     return (
         <div className="glass rounded-2xl p-5 flex flex-col gap-3 hover:border-white/20 hover:scale-[1.02] hover:shadow-2xl hover:shadow-black/20 transition-all-premium group cursor-default">
             <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500 uppercase tracking-widest group-hover:text-slate-400 transition-colors">{label}</span>
+                <span className="text-xs font-bold text-slate-500 tracking-wider group-hover:text-slate-400 transition-colors capitalize">{label}</span>
                 <div className={clsx('w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-500 group-hover:scale-110', colorClass)}>
                     {icon}
                 </div>

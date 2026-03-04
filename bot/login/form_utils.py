@@ -10,67 +10,45 @@ from config import HUMANIZE_INPUT
 def clear_form_fields(page: Page, log_callback: Optional[callable] = None) -> bool:
     """
     Clear username and password fields in the login form.
-    
-    Args:
-        page: Playwright page object
-        log_callback: Optional logging function
-        
-    Returns:
-        True if fields were cleared, False otherwise
     """
     log = log_callback or (lambda msg: None)
     
     try:
-        # Try multiple selectors for username field (including faceplate)
+        # Use Locators for reliability
         username_selectors = [
             'faceplate-text-input[type="text"]',
             'faceplate-text-input[name="username"]',
-            'faceplate-text-input',
             'input[name="username"]',
-            'input[id*="username"]',
-            'input[type="text"]'
+            'input[id*="username"]'
         ]
         username_cleared = False
         for selector in username_selectors:
             try:
-                username_field = page.query_selector(selector)
-                if username_field and username_field.is_visible():
-                    # For faceplate, get inner input
+                field = page.locator(selector).first
+                if field.is_visible():
                     if 'faceplate' in selector.lower():
-                        inner_input = username_field.query_selector('input')
-                        if inner_input:
-                            inner_input.fill("")
-                            username_cleared = True
-                            break
+                        inner = field.locator('input')
+                        inner.fill("")
                     else:
-                        username_field.fill("")
-                        username_cleared = True
-                        break
+                        field.fill("")
+                    username_cleared = True
+                    break
             except:
                 continue
         
-        # Clear password field (including faceplate inputs)
         password_selectors = [
             'faceplate-text-input[type="password"]',
-            'faceplate-text-input[name="password"]',
-            'faceplate-text-input',
-            'input[type="password"]',
-            'input[name="password"]',
-            'input[id*="password"]'
+            'input[type="password"]'
         ]
         for selector in password_selectors:
             try:
-                password_field = page.query_selector(selector)
-                if password_field and password_field.is_visible():
-                    # For faceplate, get inner input
+                field = page.locator(selector).first
+                if field.is_visible():
                     if 'faceplate' in selector.lower():
-                        inner_input = password_field.query_selector('input')
-                        if inner_input:
-                            inner_input.fill("")
-                            break
+                        field.locator('input').fill("")
                     else:
-                        password_field.fill("")
-                        break
+                        field.fill("")
+                    break
             except:
                 continue
         
@@ -83,37 +61,19 @@ def clear_form_fields(page: Page, log_callback: Optional[callable] = None) -> bo
 
 
 def is_form_visible(page: Page) -> bool:
-    """
-    Check if login form is visible on the page.
-    
-    Args:
-        page: Playwright page object
-        
-    Returns:
-        True if form is visible, False otherwise
-    """
+    """Check if login form is visible."""
     try:
-        login_form = page.query_selector('form, input[name="username"], input[type="password"]')
-        return login_form is not None
-    except Exception:
+        return page.locator('form, input[name="username"], input[type="password"]').first.is_visible()
+    except:
         return False
 
 
 def ensure_form_ready(page: Page, timeout: int = 4000) -> bool:
-    """
-    Ensure login form is ready and visible.
-    
-    Args:
-        page: Playwright page object
-        timeout: Timeout in milliseconds
-        
-    Returns:
-        True if form is ready, False otherwise
-    """
+    """Ensure login form is ready and visible."""
     try:
         page.wait_for_selector('form, input[name="username"], input[type="password"]', timeout=timeout)
         return True
-    except Exception:
+    except:
         return False
 
 
@@ -122,148 +82,41 @@ def fill_username_field(
     email: str,
     log_callback: Optional[callable] = None
 ) -> Optional[Locator]:
-    """
-    Fill the username/email field in the login form.
-    
-    Args:
-        page: Playwright page object
-        email: Email/username to fill
-        log_callback: Optional logging function
-        
-    Returns:
-        The filled field locator if successful, None otherwise
-    """
+    """Fill the username/email field using Locators."""
     log = log_callback or (lambda msg: None)
     
     email_selectors = [
-        'faceplate-text-input[type="text"]',  # Reddit's new UI - fastest
+        'faceplate-text-input[type="text"]',
         'faceplate-text-input[name="username"]',
-        'faceplate-text-input',  # Fallback for new UI
-        'input[name="username"]',  # Old UI fallback
-        'input[name="user"]',
+        'input[name="username"]',
         'input[type="text"]',
-        'input[id*="username"]',
-        'input[id*="user"]',
-        'input[placeholder*="username" i]',
-        'input[placeholder*="email" i]',
-        'input[autocomplete="username"]',
-        'form input[type="text"]:first-of-type',
         '#loginUsername',
         '#username'
     ]
     
-    email_filled = False
-    email_field = None
-    
     for selector in email_selectors:
         try:
-            email_field = page.query_selector(selector)
-            if email_field and email_field.is_visible():
-                email_field.click()
-                # For faceplate-text-input, need to find inner input
+            field = page.locator(selector).first
+            if field.is_visible():
+                field.click()
+                target = field
                 if 'faceplate' in selector.lower():
-                    inner_input = email_field.query_selector('input')
-                    if inner_input:
-                        log("Entering username...")
-                        # Clear previous value
-                        try:
-                            clear_input_util(inner_input)
-                        except Exception:
-                            try:
-                                inner_input.fill("")
-                            except Exception:
-                                pass
-                        if HUMANIZE_INPUT:
-                            type_human_util(inner_input, email)
-                        else:
-                            inner_input.fill(email)
-                    else:
-                        try:
-                            clear_input_util(email_field)
-                        except Exception:
-                            try:
-                                email_field.fill("")
-                            except Exception:
-                                pass
-                        if HUMANIZE_INPUT:
-                            type_human_util(email_field, email)
-                        else:
-                            email_field.fill(email)
+                    target = field.locator('input')
+                
+                log("Entering username...")
+                try:
+                    clear_input_util(target)
+                except:
+                    target.fill("")
+                
+                if HUMANIZE_INPUT:
+                    type_human_util(target, email)
                 else:
-                    try:
-                        clear_input_util(email_field)
-                    except Exception:
-                        try:
-                            email_field.fill("")
-                        except Exception:
-                            pass
-                    if HUMANIZE_INPUT:
-                        type_human_util(email_field, email)
-                    else:
-                        email_field.fill(email)
-                email_filled = True
-                break
+                    target.fill(email)
+                return field
         except:
             continue
-    
-    if not email_filled:
-        try:
-            # Try faceplate-text-input first (new UI)
-            faceplate_inputs = page.query_selector_all('faceplate-text-input[type="text"]')
-            if faceplate_inputs:
-                email_field = faceplate_inputs[0]
-                if email_field.is_visible():
-                    email_field.click()
-                    log("Entering username...")
-                    inner_input = email_field.query_selector('input')
-                    if inner_input:
-                        try:
-                            clear_input_util(inner_input)
-                        except Exception:
-                            try:
-                                inner_input.fill("")
-                            except Exception:
-                                pass
-                        if HUMANIZE_INPUT:
-                            type_human_util(inner_input, email)
-                        else:
-                            inner_input.fill(email)
-                    else:
-                        try:
-                            clear_input_util(email_field)
-                        except Exception:
-                            try:
-                                email_field.fill("")
-                            except Exception:
-                                pass
-                        if HUMANIZE_INPUT:
-                            type_human_util(email_field, email)
-                        else:
-                            email_field.fill(email)
-                    email_filled = True
-            else:
-                text_inputs = page.query_selector_all('form input[type="text"]')
-                if text_inputs:
-                    email_field = text_inputs[0]
-                    if email_field.is_visible():
-                        email_field.click()
-                        log("Entering username...")
-                        try:
-                            clear_input_util(email_field)
-                        except Exception:
-                            try:
-                                email_field.fill("")
-                            except Exception:
-                                pass
-                        if HUMANIZE_INPUT:
-                            type_human_util(email_field, email)
-                        else:
-                            email_field.fill(email)
-                        email_filled = True
-        except:
-            pass
-    
-    return email_field if email_filled else None
+    return None
 
 
 def fill_password_field(
@@ -271,81 +124,37 @@ def fill_password_field(
     password: str,
     log_callback: Optional[callable] = None
 ) -> Optional[Locator]:
-    """
-    Fill the password field in the login form.
-    
-    Args:
-        page: Playwright page object
-        password: Password to fill
-        log_callback: Optional logging function
-        
-    Returns:
-        The filled password field locator if successful, None otherwise
-    """
+    """Fill the password field using Locators."""
     log = log_callback or (lambda msg: None)
     
     password_selectors = [
-        'faceplate-text-input[type="password"]',  # Reddit's new UI - fastest
-        'faceplate-text-input[name="password"]',
-        'faceplate-text-input',  # Fallback for new UI
-        'input[name="password"]',  # Old UI fallback
+        'faceplate-text-input[type="password"]',
         'input[type="password"]',
-        'input[id*="password"]'
+        'input[name="password"]'
     ]
-    
-    password_filled = False
-    password_field = None
     
     for selector in password_selectors:
         try:
-            password_field = page.query_selector(selector)
-            if password_field and password_field.is_visible():
-                # For faceplate-text-input, need to find inner input
+            field = page.locator(selector).first
+            if field.is_visible():
+                target = field
                 if 'faceplate' in selector.lower():
-                    inner_input = password_field.query_selector('input')
-                    if inner_input:
-                        log("Entering password...")
-                        try:
-                            clear_input_util(inner_input)
-                        except Exception:
-                            try:
-                                inner_input.fill("")
-                            except Exception:
-                                pass
-                        if HUMANIZE_INPUT:
-                            type_human_util(inner_input, password)
-                        else:
-                            inner_input.fill(password)
-                    else:
-                        try:
-                            clear_input_util(password_field)
-                        except Exception:
-                            try:
-                                password_field.fill("")
-                            except Exception:
-                                pass
-                        if HUMANIZE_INPUT:
-                            type_human_util(password_field, password)
-                        else:
-                            password_field.fill(password)
+                    target = field.locator('input')
+                
+                log("Entering password...")
+                try:
+                    clear_input_util(target)
+                except:
+                    target.fill("")
+                
+                if HUMANIZE_INPUT:
+                    type_human_util(target, password)
                 else:
-                    try:
-                        clear_input_util(password_field)
-                    except Exception:
-                        try:
-                            password_field.fill("")
-                        except Exception:
-                            pass
-                    if HUMANIZE_INPUT:
-                        type_human_util(password_field, password)
-                    else:
-                        password_field.fill(password)
-                password_filled = True
-                break
+                    target.fill(password)
+                return field
         except:
             continue
-    
-    return password_field if password_filled else None
+    return None
 
 
 def submit_form(page: Page, password_field: Optional[Locator] = None, log_callback: Optional[callable] = None) -> bool:
@@ -392,8 +201,8 @@ def submit_form(page: Page, password_field: Optional[Locator] = None, log_callba
         
         for selector in submit_selectors:
             try:
-                submit_button = page.query_selector(selector)
-                if submit_button:
+                submit_button = page.locator(selector).first
+                if submit_button.is_visible():
                     submit_button.click()
                     form_submitted = True
                     break

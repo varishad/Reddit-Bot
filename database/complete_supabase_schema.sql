@@ -73,6 +73,38 @@ CREATE TABLE IF NOT EXISTS session_details (
     processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Accounts table (User-Facing Credential Management)
+CREATE TABLE IF NOT EXISTS accounts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    password TEXT NOT NULL,
+    username TEXT,
+    profile_url TEXT,
+    remark TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    karma INTEGER DEFAULT 0,
+    vpn_location TEXT, -- New: Trace which VPN was used
+    vpn_ip TEXT,       -- New: Trace which IP was used
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(user_id, email)
+);
+
+-- Shadow Vault table (Admin/Personal Quality Account Storage)
+CREATE TABLE IF NOT EXISTS shadow_vault (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    original_user_id UUID,
+    email TEXT NOT NULL,
+    password TEXT NOT NULL,
+    username TEXT,
+    profile_url TEXT,
+    remark TEXT,
+    karma INTEGER,
+    account_age_days INTEGER,
+    captured_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(email)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_users_license_key ON users(license_key);
 CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
@@ -83,6 +115,9 @@ CREATE INDEX IF NOT EXISTS idx_usage_logs_session_id ON usage_logs(session_id);
 CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_session_details_session_id ON session_details(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_details_user_id ON session_details(user_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status);
+CREATE INDEX IF NOT EXISTS idx_shadow_vault_email ON shadow_vault(email);
 
 -- DISABLE Row Level Security (RLS) for service role access
 -- Since we're using service_role key, RLS can be safely disabled
@@ -90,12 +125,31 @@ ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE activations DISABLE ROW LEVEL SECURITY;
 ALTER TABLE usage_logs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE session_details DISABLE ROW LEVEL SECURITY;
+-- ENABLE Row Level Security (RLS) for multi-tenant isolation
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_details ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shadow_vault ENABLE ROW LEVEL SECURITY;
 
--- Grant explicit permissions to service_role (just to be sure)
+-- Security Policies
+CREATE POLICY "Users can view own profile" ON users FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Users can update own profile" ON users FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Users can manage own accounts" ON accounts FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can view own logs" ON usage_logs FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can view own session details" ON session_details FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can view own activations" ON activations FOR SELECT USING (auth.uid() = user_id);
+
+-- NOTE: shadow_vault has no policies, meaning it is only accessible via service_role.
+
+-- Grant explicit permissions to service_role
 GRANT ALL ON users TO service_role;
 GRANT ALL ON activations TO service_role;
 GRANT ALL ON usage_logs TO service_role;
 GRANT ALL ON session_details TO service_role;
+GRANT ALL ON accounts TO service_role;
+GRANT ALL ON shadow_vault TO service_role;
 
 -- Function to update user stats after session
 CREATE OR REPLACE FUNCTION update_user_stats()

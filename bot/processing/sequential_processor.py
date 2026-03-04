@@ -180,8 +180,8 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                     or ('unusual activity' in err_lower)
                 )
 
-                if (is_something_wrong or is_error_occurred) and status == "error":
-                    error_type = "an error occurred" if is_error_occurred else "something went wrong"
+                if (is_something_wrong or is_error_occurred or status == "security_block"):
+                    error_type = "security block" if status == "security_block" else ("an error occurred" if is_error_occurred else "something went wrong")
                     max_retries = 3
                     retry_successful = False
 
@@ -190,6 +190,18 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                             break
 
                         engine.log(f"🔄 Retry attempt {retry_attempt}/{max_retries} for {email} due to '{error_type}' error...")
+                        
+                        # Show retry status in the UI/Inventory list
+                        try:
+                            engine.db.log_account_result(
+                                engine.session_id, 
+                                email, 
+                                "retrying", 
+                                password=password, 
+                                error_message=f"Retry {retry_attempt}/{max_retries}: {error_type}"
+                            )
+                        except:
+                            pass
 
                         if retry_attempt > 1 and engine.vpn_manager:
                             engine.log(f"🌐 Changing VPN for retry attempt {retry_attempt}...")
@@ -356,27 +368,37 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                             page = pages[0] if pages else context.new_page()
                         except Exception:
                             page = context.new_page()
-                        engine.log("✅ Fresh browser started")
                     except Exception as re_err:
                         engine.log(f"Browser restart error: {str(re_err)}")
                         return results
+
+                if engine.should_stop:
+                    break
+
+                # Fetch current IP info if VPN is on
+                if engine.vpn_manager and engine.vpn_connected_at_start:
+                    try:
+                        ip, country, _ = get_ip_info()
+                    except:
+                        ip, country = "Unknown", "Unknown"
 
                 engine.db.log_account_result(
                     engine.session_id,
                     email,
                     result["status"],
+                    result.get("password"),
                     result.get("username"),
                     result.get("karma"),
                     result.get("error_message"),
+                    vpn_location=engine.current_vpn_location,
+                    vpn_ip=ip if 'ip' in locals() else None
                 )
+                
                 if engine.result_callback:
                     try:
                         engine.result_callback(result)
                     except Exception:
                         pass
-
-                if engine.should_stop:
-                    break
 
                 if result["status"].lower() == "success":
                     engine.log(f"✅ Login successful: {email}")

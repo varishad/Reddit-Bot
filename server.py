@@ -112,7 +112,7 @@ async def startup_event():
     asyncio.create_task(initialize_vpn())
 
 # --- Background Worker ---
-def bot_worker(file_path: str, parallel_browsers: int):
+def bot_worker(file_path: str, parallel_browsers: int, batch_limit: int = 100, include_statuses: List[str] = ["pending", "error"]):
     """Thread worker that executes the bot logic."""
     try:
         with state.lock:
@@ -203,8 +203,8 @@ def bot_worker(file_path: str, parallel_browsers: int):
         
         threading.Thread(target=sync_status_loop, daemon=True).start()
         
-        log_to_state(f"🚀 Bot execution started (Session: {state.current_session_id})")
-        state.bot_instance.process_credentials(file_path, parallel_browsers)
+        log_to_state(f"🚀 Bot execution started (Session: {state.current_session_id}, Filter: {', '.join(include_statuses)}, Batch: {batch_limit})")
+        state.bot_instance.process_credentials(file_path, parallel_browsers, batch_limit=batch_limit, include_statuses=include_statuses)
         log_to_state("✅ Bot execution completed successfully.")
         
     except Exception as e:
@@ -243,6 +243,24 @@ class AppState:
         
         # Load user settings
         self.settings = self.load_user_settings()
+        
+        # --- AUTO-SESSION RESTORATION ---
+        # If we have saved credentials, auto-authenticate to restore current_user_id
+        try:
+            if os.path.exists("saved_credentials.json"):
+                with open("saved_credentials.json", "r") as f:
+                    creds = json.load(f)
+                    license_key = creds.get("license_key")
+                    password = creds.get("password")
+                    if license_key and password:
+                        logger.info(f"🔑 [AUTO-LOGIN] Attempting to restore session for {license_key[:10]}...")
+                        success, _, _ = self.db.authenticate_user(license_key, password)
+                        if success:
+                            logger.info("✅ [AUTO-LOGIN] Session restored successfully.")
+                        else:
+                            logger.warning("⚠️ [AUTO-LOGIN] Failed to restore session.")
+        except Exception as e:
+            logger.error(f"Error during auto-login: {e}")
 
     def load_user_settings(self) -> Dict[str, Any]:
         import json
@@ -489,11 +507,15 @@ async def upload_credentials(file: UploadFile = File(...)):
         with open("credentials.txt", "w") as f:
             f.write(text)
             
-        # Log as pending for UI visibility
+        # Save persistently to Database
         accounts = parse_credentials_text(text)
-        state.db.log_batch_results(accounts)
+        success, msg = state.db.save_accounts(accounts)
         
-        log_to_state(f"📁 Credentials file uploaded: {file.filename} ({len(accounts)} accounts)")
+        if success:
+            log_to_state(f"📁 Credentials file uploaded and saved to DB: {file.filename} ({len(accounts)} accounts)")
+        else:
+            log_to_state(f"⚠️ File uploaded but DB save failed: {msg}", "warning")
+
         return {"status": "success", "message": f"Successfully uploaded {len(accounts)} accounts"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -506,11 +528,15 @@ async def paste_credentials(text: str = Body(..., embed=True)):
         with open("credentials.txt", "w") as f:
             f.write(text)
             
-        # Log as pending for UI visibility
+        # Save persistently to Database
         accounts = parse_credentials_text(text)
-        state.db.log_batch_results(accounts)
+        success, msg = state.db.save_accounts(accounts)
         
-        log_to_state(f"📋 Credentials pasted and saved ({len(accounts)} accounts)")
+        if success:
+            log_to_state(f"📋 Credentials pasted and saved to DB ({len(accounts)} accounts)")
+        else:
+            log_to_state(f"⚠️ Credentials pasted but DB save failed: {msg}", "warning")
+
         return {"status": "success", "message": f"Successfully saved {len(accounts)} accounts"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -518,8 +544,10 @@ async def paste_credentials(text: str = Body(..., embed=True)):
 @app.post("/bot/start")
 async def start_bot(
     background_tasks: BackgroundTasks,
-    file_path: str = "credentials.txt",
-    parallel_browsers: int = 1
+    file_path: Optional[str] = None,
+    parallel_browsers: int = 1,
+    batch_limit: int = 100,
+    include_statuses: List[str] = Body(["pending", "error"])
 ):
     if state.is_running or state.is_starting:
         return {"status": "error", "message": "Bot is already running or starting."}
@@ -527,17 +555,17 @@ async def start_bot(
     state.is_starting = True
     try:
         state.reset_stats()
-        background_tasks.add_task(bot_worker_wrapper, file_path, parallel_browsers)
+        background_tasks.add_task(bot_worker_wrapper, file_path, parallel_browsers, batch_limit, include_statuses)
         return {"status": "success", "message": "Bot startup initiated."}
     except Exception as e:
         state.is_starting = False
         log_to_state(f"❌ Startup Request Error: {str(e)}", "error")
         return {"status": "error", "message": f"Startup failed: {str(e)}"}
 
-def bot_worker_wrapper(file_path: str, parallel_browsers: int):
+def bot_worker_wrapper(file_path: str, parallel_browsers: int, batch_limit: int, include_statuses: List[str]):
     """Small wrapper to manage is_starting flag outside the main worker logic."""
     try:
-        bot_worker(file_path, parallel_browsers)
+        bot_worker(file_path, parallel_browsers, batch_limit, include_statuses)
     finally:
         state.is_starting = False
 
@@ -558,16 +586,32 @@ async def get_status():
         start_dt = datetime.fromisoformat(state.stats["start_time"])
         uptime = int((datetime.now() - start_dt).total_seconds())
 
+    # Get industrial stats from Supabase
+    db_stats = state.db.get_processing_stats()
+
     with state.lock:
         return {
             "is_running": state.is_running,
+            "is_starting": state.is_starting,
             "session_id": state.current_session_id,
             "vpn_location": state.current_vpn_location,
             "active_browsers": state.active_browsers,
             "browser_status": state.browser_status,
-            "stats": {**state.stats, "uptime_seconds": uptime},
-            "recent_logs": list(state.logs)[-20:]  # Return last 20 logs for UI snappiness
+            "stats": {
+                **state.stats, 
+                "uptime_seconds": uptime,
+                "db_stats": db_stats # Industry stats for progress bar
+            },
+            "recent_logs": list(state.logs)[-200:]
         }
+
+@app.post("/accounts/cleanup-invalid")
+async def cleanup_invalid():
+    """Bulk delete all invalid or error accounts."""
+    success, msg = state.db.delete_invalid_accounts()
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "success", "message": msg}
 
 @app.get("/bot/full-logs")
 async def get_all_logs():
@@ -577,7 +621,44 @@ async def get_all_logs():
 # --- Accounts ---
 @app.get("/accounts/results")
 async def get_results():
-    """Return results from local storage."""
+    """Return results from local storage and persistent database."""
+    combined_results = []
+    
+    # 1. Fetch persistent accounts from Supabase
+    if state.db.current_user_id:
+        try:
+            res = state.db.client.table("accounts").select("*").eq("user_id", state.db.current_user_id).order("created_at", desc=True).execute()
+            if res.data:
+                # Map DB format to UI format
+                for acc in res.data:
+                    combined_results.append({
+                        'id': acc['id'],
+                        'session_id': None, # Persistent accounts aren't tied to a volatile session
+                        'email': acc['email'],
+                        'reddit_password': acc.get('password'),
+                        'status': acc.get('status', 'pending'),
+                        'username': acc.get('username'),
+                        'profile_url': acc.get('profile_url'),
+                        'remark': acc.get('remark'),
+                        'karma': acc.get('karma'),
+                        'vpn_location': acc.get('vpn_location'),
+                        'vpn_ip': acc.get('vpn_ip'),
+                        'error_message': None,
+                        'created_at': acc.get('created_at')
+                    })
+        except Exception as e:
+            logger.error(f"Error fetching persistent accounts: {e}")
+
+    # --- Account Management ---
+    @app.delete("/accounts/{account_id}")
+    async def delete_account(account_id: str):
+        """Delete an account from persistent storage."""
+        success, msg = state.db.delete_account(account_id)
+        if not success:
+            raise HTTPException(status_code=400, detail=msg)
+        return {"status": "success", "message": msg}
+
+    # 2. Add/Overlay local session results
     try:
         import json
         import os
@@ -585,18 +666,24 @@ async def get_results():
         
         if os.path.exists(results_file):
             with open(results_file, 'r') as f:
-                all_results = json.load(f)
+                local_results = json.load(f)
             
-            # Filter by current session if active, otherwise show recent
-            if state.current_session_id:
-                # Include current session results AND any pending (session_id=None) accounts
-                return [r for r in all_results if r.get('session_id') == state.current_session_id or r.get('session_id') is None]
-            return all_results[:500]
-            
+            # Use email as key to avoid duplicates (favor local session info if active)
+            seen_emails = {r['email'] for r in combined_results}
+            for lr in local_results:
+                if lr['email'] not in seen_emails:
+                    combined_results.append(lr)
+                else:
+                    # Update existing with session info if more recent/specific
+                    for i, cr in enumerate(combined_results):
+                        if cr['email'] == lr['email'] and lr.get('session_id') == state.current_session_id:
+                            combined_results[i] = lr
+                            break
+                            
     except Exception as e:
-        print(f"Error reading local results: {e}")
+        logger.error(f"Error reading local results: {e}")
         
-    return []
+    return combined_results
 
 # --- VPN ---
 @app.get("/vpn/status")

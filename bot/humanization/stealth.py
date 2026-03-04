@@ -13,6 +13,7 @@ def apply_basic_stealth(page: Page, fingerprint: Optional[dict] = None) -> None:
     Args:
         page: Playwright page object to apply stealth to
         fingerprint: Optional hardware/device profile to inject
+        skip_webdriver: If True, do not patch navigator.webdriver (avoids double-patching)
     """
     
     # Default values if no fingerprint provided
@@ -24,11 +25,15 @@ def apply_basic_stealth(page: Page, fingerprint: Optional[dict] = None) -> None:
     renderer = fp.get("renderer", "ANGLE (Intel, Intel(R) UHD Graphics, Direct3D 11)")
     screen_depth = fp.get("screen_depth", 24)
 
+    webdriver_patch = ""
+    if not skip_webdriver:
+        webdriver_patch = "Object.defineProperty(navigator, 'webdriver', { get: () => false });"
+
     js = f"""
 () => {{
   try {{
-    // Hide webdriver property
-    Object.defineProperty(navigator, 'webdriver', {{ get: () => false }});
+    // Hide webdriver property (if requested)
+    {webdriver_patch}
     
     // Inject hardware fingerprint
     Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {hw_concurrency} }});
@@ -112,15 +117,17 @@ def apply_stealth(page: Page, stealth_module: Optional[object] = None) -> None:
         page: Playwright page object
         stealth_module: Optional playwright_stealth module (stealth_sync function)
     """
+    is_stealth_module_ok = False
     if stealth_module:
         try:
             stealth_module(page)
+            is_stealth_module_ok = True
         except Exception:
             pass
     
     # Extract fingerprint created by browser_manager
     fingerprint = getattr(page.context, '_fingerprint', None)
     
-    # Always apply basic stealth
-    apply_basic_stealth(page, fingerprint)
+    # Apply basic stealth, skipping webdriver if playwright-stealth handled it
+    apply_basic_stealth(page, fingerprint, skip_webdriver=is_stealth_module_ok)
 

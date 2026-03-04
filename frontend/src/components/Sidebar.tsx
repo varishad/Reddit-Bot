@@ -124,7 +124,7 @@ function NavGroup({
     return (
         <div>
             {label && (
-                <p className="text-[9px] font-extrabold text-slate-700 uppercase tracking-[0.18em] px-2 pb-1.5">
+                <p className="text-[9px] font-extrabold text-slate-700 tracking-[0.18em] px-2 pb-1.5">
                     {label}
                 </p>
             )}

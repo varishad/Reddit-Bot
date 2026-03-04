@@ -68,6 +68,16 @@ export interface BotStats {
     vpn_rotations: number;
     uptime_seconds: number;
     start_time: string | null;
+    db_stats?: {
+        total: number;
+        pending: number;
+        retrying: number;
+        security_block: number;
+        success: number;
+        invalid: number;
+        banned: number;
+        error: number;
+    };
 }
 
 export interface LogEntry {
@@ -78,6 +88,7 @@ export interface LogEntry {
 
 export interface BotStatus {
     is_running: boolean;
+    is_starting?: boolean;
     session_id: string | null;
     vpn_location?: string;
     active_browsers?: number;
@@ -115,8 +126,8 @@ export const botApi = {
         localStorage.removeItem('reddit_bot_auth_token');
         window.location.href = '/login';
     },
-    start: (file_path?: string, parallel_browsers?: number) =>
-        api.post('/bot/start', null, { params: { file_path, parallel_browsers } }),
+    start: (file_path?: string, parallel_browsers?: number, batch_limit?: number, include_statuses?: string[]) =>
+        api.post('/bot/start', include_statuses || ["pending", "error"], { params: { file_path, parallel_browsers, batch_limit } }),
     uploadCredentials: (file: File) => {
         const formData = new FormData();
         formData.append('file', file);
@@ -131,6 +142,8 @@ export const botApi = {
     getSettings: () => api.get('/bot/settings'),
     updateSettings: (settings: unknown) => api.post('/bot/settings', settings),
     results: () => api.get('/accounts/results'),
+    deleteAccount: (id: string) => api.delete(`/accounts/${id}`),
+    cleanupInvalid: () => api.post('/accounts/cleanup-invalid'),
     status: (): Promise<{ data: BotStatus }> => api.get('/bot/status'),
     logs: (): Promise<{ data: LogEntry[] }> => api.get('/bot/full-logs'),
     vpnDiag: (): Promise<{ data: VPNDiagnostic }> => api.get('/vpn/diag'),

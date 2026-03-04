@@ -31,19 +31,6 @@ def detect_status(page, log_callback: Optional[Callable] = None) -> Tuple[str, O
         
         current_url = page.url
         page_content = page.content().lower()
-        page_text = page.inner_text('body').lower() if page.query_selector('body') else ""
-        
-        # Check for specific error messages first (most specific to least specific)
-        
-        # 1. Check for rate limiting / too many requests
-        rate_limit_indicators = ['too many requests', 'rate limit', 'try again later', 'slow down', '429']
-        if any(indicator in page_text for indicator in rate_limit_indicators):
-            return ('error', None, None, 'Rate limited - Too many login attempts. Please wait and try again later.')
-        
-        # 2. Check for 2FA / verification required
-        two_fa_indicators = ['two-factor', '2fa', 'verification code', 'enter code', 'authenticator', 'verify']
-        if any(indicator in page_text for indicator in two_fa_indicators):
-            return ('error', None, None, 'Two-factor authentication (2FA) required - Account has 2FA enabled')
         
         # 3. Check for account locked / temporarily locked / password reset required
         # Covers banners like: "we've locked your account after detecting some unusual activity... reset your password"

@@ -406,9 +406,21 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                             "original_index": index
                                         })
 
-                            if (is_something_wrong or is_error_occurred) and status == "error":
-                                error_type = "an error occurred" if is_error_occurred else "something went wrong"
+                            if (is_something_wrong or is_error_occurred or status == "security_block"):
+                                error_type = "security block" if status == "security_block" else ("an error occurred" if is_error_occurred else "something went wrong")
                                 engine.log(f"🔄 Worker retrying {email} due to '{error_type}' error...")
+                                
+                                # Show retry status in the UI/Inventory list
+                                try:
+                                    engine.db.log_account_result(
+                                        engine.session_id, 
+                                        email, 
+                                        "retrying", 
+                                        password=password, 
+                                        error_message=f"Worker Retrying: {error_type}"
+                                    )
+                                except:
+                                    pass
                                 
                                 # Track retry attempt (before retry)
                                 worker_retry_count += 1
@@ -598,6 +610,8 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                     username=result.get("username"),
                                     karma=result.get("karma"),
                                     error_message=result.get("error_message"),
+                                    vpn_location=engine.current_vpn_location,
+                                    vpn_ip=result.get("ip_address")
                                 )
                             except Exception as db_e:
                                 engine.log(f"Database log error for {email}: {str(db_e)}")
