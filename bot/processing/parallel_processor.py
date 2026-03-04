@@ -627,7 +627,10 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                             # Only restart browser for session-risk issues, NOT for invalid credentials
                             # Invalid credentials should reuse the same page/browser
                             should_restart_browser = False
-                            if status != 'invalid':
+                            if status == 'success':
+                                # Competitor behavior: restart browser after successful login for clean session
+                                should_restart_browser = True
+                            elif status != 'invalid':
                                 # Check for session-risk issues that require browser restart
                                 if (
                                     status in ['banned', 'locked']
