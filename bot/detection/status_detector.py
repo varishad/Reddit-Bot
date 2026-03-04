@@ -22,12 +22,12 @@ def detect_status(page, log_callback: Optional[Callable] = None) -> Tuple[str, O
         status: 'success', 'invalid', 'banned', 'locked', or 'error'
     """
     try:
-        # Minimal wait for faster detection (like other bot: 1-2s)
+        # Wait for page to load (longer timeout for slower connections)
         try:
-            page.wait_for_load_state('domcontentloaded', timeout=2000)
+            page.wait_for_load_state('domcontentloaded', timeout=5000)
         except:
             pass
-        time.sleep(0.3)  # Reduced to 0.3s for faster detection
+        time.sleep(0.5)  # Brief wait for DOM to settle
         
         current_url = page.url
         page_content = page.content().lower()
@@ -258,9 +258,31 @@ def detect_status(page, log_callback: Optional[Callable] = None) -> Tuple[str, O
         if any(indicator in page_text for indicator in captcha_indicators):
             return ('error', None, None, 'CAPTCHA required - Manual intervention needed')
         
-        # 8. Check for network/connection errors
-        network_indicators = ['network error', 'connection error', 'timeout', 'failed to load', 'no internet']
-        if any(indicator in page_text for indicator in network_indicators):
+        # 8. Check for actual network/connection errors (only specific error messages)
+        # Avoid generic words that appear in normal UI
+        network_error_selectors = [
+            '.error-message:has-text("network")',
+            '[data-testid="error-page"]:has-text("network")',
+            'div:has-text("network error")',
+        ]
+        
+        # Only check for very specific network error phrases, not generic words
+        specific_network_errors = [
+            'network error - please check your connection',
+            'failed to load resource',
+            'net::err_',
+            'err_connection_reset',
+            'err_connection_refused',
+            'err_network_changed',
+            'no internet connection',
+        ]
+        
+        has_specific_network_error = any(
+            indicator in page_text for indicator in specific_network_errors
+        )
+        
+        # Only return network error if it's a specific error, not generic text
+        if has_specific_network_error:
             return ('error', None, None, 'Network error - Connection issue detected')
         
         # 9. Check for Reddit maintenance/outage
@@ -272,19 +294,32 @@ def detect_status(page, log_callback: Optional[Callable] = None) -> Tuple[str, O
         if 'error' in current_url.lower() or 'fail' in current_url.lower():
             return ('error', None, None, f'Error page detected - URL: {current_url}')
         
-        # 11. Check for empty page or loading state
-        if not page_text or len(page_text.strip()) < 50:
-            # Page might still be loading
+        # 11. Check for empty page or loading state (more lenient)
+        if not page_text or len(page_text.strip()) < 30:
+            # Page might still be loading - try once more with longer wait
             try:
-                page.wait_for_load_state('networkidle', timeout=3000)
+                page.wait_for_load_state('networkidle', timeout=5000)
                 page_text = page.inner_text('body').lower() if page.query_selector('body') else ""
-                if not page_text or len(page_text.strip()) < 50:
-                    return ('error', None, None, 'Empty or incomplete page - Possible loading issue')
+                if not page_text or len(page_text.strip()) < 30:
+                    # Don't return error yet - page might be legitimate empty state (like redirect)
+                    # Check if we're on a valid Reddit page
+                    if 'reddit.com' in current_url.lower():
+                        # Try one more approach - get content instead of inner_text
+                        page_content = page.content().lower()
+                        if len(page_content) > 500:
+                            # Page has content, just not text - likely legitimate
+                            page_text = "has_content"  # Mark as valid
             except:
-                return ('error', None, None, 'Page loading timeout - Content not loaded')
+                # Even if wait fails, don't immediately error
+                pass
         
-        # 12. Default error with more context
-        return ('error', None, None, f'Unable to determine login status - URL: {current_url[:100]}, Page length: {len(page_text)} chars')
+        # 12. Default error - only if truly cannot determine
+        if not page_text or (len(page_text.strip()) < 30 and page_text != "has_content"):
+            # Check URL for redirect indicator
+            if 'reddit.com' in current_url.lower():
+                # On Reddit but can't read - might be loading, return success with unknown
+                return ('success', None, None, 'Logged in but could not extract user info')
+            return ('error', None, None, f'Unable to determine login status - URL: {current_url[:100]}')
     
     except PlaywrightTimeoutError:
         return ('error', None, None, 'Timeout waiting for page to load - Page took too long to respond')

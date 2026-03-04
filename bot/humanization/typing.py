@@ -8,21 +8,31 @@ from config import HUMAN_TYPING_DELAY_MIN_MS, HUMAN_TYPING_DELAY_MAX_MS, INSTANT
 
 def type_human(element: Locator, text: str) -> None:
     """
-    Type with per-character delay to simulate human typing, 
-    or use instant fill if configured.
-    Each keystroke gets a unique random delay for realistic variation.
+    Type with per-character variable delay to simulate realistic human typing.
+    Each character gets a unique random delay, with occasional micro-pauses
+    to simulate thinking/hesitation.
     """
     if INSTANT_FILL_ENABLED:
         fill_instant(element, text)
         return
 
-    import time
     try:
+        import time
         element.click()
-        for char in text:
-            delay = _random.uniform(HUMAN_TYPING_DELAY_MIN_MS, HUMAN_TYPING_DELAY_MAX_MS) / 1000.0
-            element.press(char)
-            time.sleep(delay)
+        for i, char in enumerate(text):
+            # Base delay: random per character (30-80ms)
+            delay_ms = _random.uniform(HUMAN_TYPING_DELAY_MIN_MS, HUMAN_TYPING_DELAY_MAX_MS)
+            
+            # Occasional micro-pause to simulate hesitation (~15% chance)
+            if _random.random() < 0.15 and i > 0:
+                delay_ms += _random.uniform(80, 200)
+            
+            # Slight speed burst on common characters (space, @, .)
+            if char in (' ', '@', '.'):
+                delay_ms *= _random.uniform(0.6, 0.9)
+            
+            time.sleep(delay_ms / 1000.0)
+            element.press_sequentially(char)
     except Exception:
         try:
             element.fill(text)

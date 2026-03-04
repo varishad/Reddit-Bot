@@ -311,7 +311,8 @@ class RedditBotEngine:
                 except Exception as e:
                     self.log(f"⚠️ Stealth apply skip: {str(e)}")
             
-            login_url = "https://www.reddit.com/login/?dest=https%3A%2F%2Fwww.reddit.com%2Fuser%2Fme%2F&rdt=46144"
+            rdt_value = _random.randint(10000, 99999)
+            login_url = f"https://www.reddit.com/login/?dest=https%3A%2F%2Fwww.reddit.com%2Fuser%2Fme%2F&rdt={rdt_value}"
 
             # If reusing page and we're already on login page with form visible, just clear fields
             if reuse_page:
@@ -390,7 +391,6 @@ class RedditBotEngine:
                 page.wait_for_load_state('domcontentloaded', timeout=5000)
             except Exception as e:
                 self.log(f"⚠️ Load state pause error: {str(e)}")
-            time.sleep(0.1)  # Minimal wait for DOM to settle
             
             try:
                 page.wait_for_selector('input[type="text"], input[name="username"], input[id*="username"]', timeout=5000)
@@ -431,7 +431,6 @@ class RedditBotEngine:
                     gentle_scroll_util(page)
                 except Exception as e:
                     self.log(f"⚠️ Post-submit humanization error: {str(e)}")
-            time.sleep(0.1)  # Minimal wait for DOM to settle
             
             # Detect status
             status, username, karma, error_msg = self.detect_status(page)

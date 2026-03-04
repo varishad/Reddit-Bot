@@ -1,0 +1,61 @@
+{
+    "max_browsers": 3,
+    "vpn_enabled": true,
+    "vpn_connect_cmd": "cd \"C:\\Program Files (x86)\\ExpressVPN\\services\" && ExpressVPN.CLI.exe connect \"{server}\"",
+    "vpn_disconnect_cmd": "cd \"C:\\Program Files (x86)\\ExpressVPN\\services\" && ExpressVPN.CLI.exe disconnect",
+    "vpn_pause_seconds": 5,
+    "rate_limit_wait_seconds": 5,
+    "success_wait_seconds": 7,
+    "login_url": "https://www.reddit.com/login/",
+    "use_old_reddit": false,
+    "headless": false,
+    "implicit_wait_seconds": 3,
+    "max_retries_on_rate_limit": 9999,
+    "rate_limit_strings": [
+        "try again later",
+        "rate limited",
+        "too many requests",
+        "unusual traffic",
+        "something went wrong",
+        "server error"
+    ],
+    "invalid_strings": [
+        "wrong password",
+        "incorrect username",
+        "invalid username",
+        "incorrect password",
+        "invalid email",
+        "invalid email or password",
+        "incorrect username or password"
+    ],
+    "ban_strings": [
+        "this account has been permanently banned",
+        "check your inbox for a message with more information",
+        "visit inbox",
+        "for your security, we've locked your account after detecting some unusual activity",
+        "reset your password",
+        "reset password",
+        "locked your account"
+    ],
+    "detected_strings": [
+        "unusual activity",
+        "detected some unusual",
+        "security check",
+        "verify your account"
+    ],
+    "extension_error_strings": [
+        "An error occurred. Please disable any extensions or try using a different web browser to continue."
+    ],
+    "already_logged_in_strings": [
+        "Welcome back!",
+        "You are already logged in",
+        "redirected back to Reddit shortly",
+        "already logged in and will be redirected"
+    ],
+    "worker_delay_between_accounts": 0.5,
+    "license_key": "Shuvo909@123",
+    "google_sheets_url": "https://docs.google.com/spreadsheets/d/16RPSRhjOA3Nomjy0iCAvevsD9kn2MADdfusAm_66_EA/edit?gid=0#gid=0",
+    "bot_name": "Reddit Combo Checker by System Saviors",
+    "device_owner": "Jahid Hasan Shuvo",
+    "vpn_status_cmd": "\"C:\\Program Files (x86)\\ExpressVPN\\services\\ExpressVPN.CLI.exe\" status"
+}
