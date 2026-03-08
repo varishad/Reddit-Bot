@@ -175,8 +175,8 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                 status = result["status"].lower()
                 is_failure = status in ["banned", "error"]
                 err_lower = (result.get("error_message", "") or "").lower()
-                is_blocked = ("blocked" in err_lower) or ("detect" in err_lower)
-                is_rate_limit = ("rate limit" in err_lower) or ("too many" in err_lower)
+                is_blocked = ("blocked" in err_lower) or ("detect" in err_lower) or ("server error" in err_lower)
+                is_rate_limit = ("rate limit" in err_lower) or ("too many" in err_lower) or ("try again" in err_lower)
                 is_something_wrong = ("something went wrong logging in" in err_lower) or ("went wrong" in err_lower)
                 is_error_occurred = (
                     ("an error occurred" in err_lower)

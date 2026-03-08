@@ -76,8 +76,8 @@ def detect_status(page, log_callback: Optional[Callable] = None) -> Tuple[str, O
                                 return ('invalid', None, None, 'Invalid email or password.')
                             if 'something went wrong logging in' in error_lower:
                                 return ('error', None, None, 'Something went wrong logging in. Please try again.')
-                            if any(k in error_lower for k in ['too many', 'rate limit', 'try again later']):
-                                return ('error', None, None, 'Rate limited - Too many requests. Please wait and try again.')
+                            if any(k in error_lower for k in ['too many', 'rate limit', 'try again later', 'server error']):
+                                return ('error', None, None, 'Rate limited or Server Block - Please change IP/VPN and try again.')
                             
                             # Generic invalid cases
                             if any(word in error_lower for word in ['incorrect', 'wrong']) and any(w in error_lower for w in ['password','username','email','credentials']):
@@ -228,9 +228,9 @@ def detect_status(page, log_callback: Optional[Callable] = None) -> Tuple[str, O
             return ('error', None, None, 'Network error - Connection issue detected')
         
         # 9. Check for Reddit maintenance/outage
-        maintenance_indicators = ['maintenance', 'down for maintenance', 'temporarily unavailable', 'service unavailable', '503']
+        maintenance_indicators = ['maintenance', 'down for maintenance', 'temporarily unavailable', 'service unavailable', '503', 'server error']
         if any(indicator in page_text for indicator in maintenance_indicators):
-            return ('error', None, None, 'Reddit service unavailable - Maintenance or outage')
+            return ('error', None, None, 'Reddit service unavailable or Server Block - Restarting session')
         
         # 10. Check URL for clues
         if 'error' in current_url.lower() or 'fail' in current_url.lower():

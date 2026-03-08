@@ -283,8 +283,8 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                             err_lower = (result.get("error_message", "") or "").lower()
                             
                             # Smart Hybrid: Detect critical errors (blocked/rate limit) for immediate retry
-                            is_blocked = 'blocked' in err_lower or 'detect' in err_lower
-                            is_rate_limit = 'rate limit' in err_lower or 'too many' in err_lower
+                            is_blocked = 'blocked' in err_lower or 'detect' in err_lower or 'server error' in err_lower
+                            is_rate_limit = 'rate limit' in err_lower or 'too many' in err_lower or 'try again' in err_lower
                             is_critical_error = is_blocked or is_rate_limit
                             
                             is_something_wrong = ("something went wrong logging in" in err_lower) or ("went wrong" in err_lower)
@@ -370,8 +370,8 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                     
                                     immediate_retry_status = immediate_retry_result.get("status", "").lower()
                                     immediate_retry_err = (immediate_retry_result.get("error_message", "") or "").lower()
-                                    immediate_retry_is_blocked = 'blocked' in immediate_retry_err or 'detect' in immediate_retry_err
-                                    immediate_retry_is_rate_limit = 'rate limit' in immediate_retry_err or 'too many' in immediate_retry_err
+                                    immediate_retry_is_blocked = 'blocked' in immediate_retry_err or 'detect' in immediate_retry_err or 'server error' in immediate_retry_err
+                                    immediate_retry_is_rate_limit = 'rate limit' in immediate_retry_err or 'too many' in immediate_retry_err or 'try again' in immediate_retry_err
                                     
                                     if immediate_retry_status in ["success", "invalid", "banned", "locked"]:
                                         # Immediate retry succeeded - use this result
@@ -529,8 +529,8 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                         
                                         # Check for VPN rotation triggers (Smart Hybrid Strategy)
                                         # Rule 1: Critical errors (Blocked/RateLimit + Retry Failure) = Immediate VPN rotation
-                                        retry_is_blocked = 'blocked' in retry_err_lower or 'detect' in retry_err_lower
-                                        retry_is_rate_limit = 'rate limit' in retry_err_lower or 'too many' in retry_err_lower
+                                        retry_is_blocked = 'blocked' in retry_err_lower or 'detect' in retry_err_lower or 'server error' in retry_err_lower
+                                        retry_is_rate_limit = 'rate limit' in retry_err_lower or 'too many' in retry_err_lower or 'try again' in retry_err_lower
                                         
                                         # Rule 2: Worker has 2+ retry failures (worker-level pattern)
                                         # Rule 3: 3+ consecutive retry failures (strong indicator)
