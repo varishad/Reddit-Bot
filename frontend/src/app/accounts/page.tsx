@@ -138,14 +138,14 @@ export default function AccountsPage() {
                         className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass text-slate-300 font-semibold text-sm hover:text-white hover:border-white/20 transition-all"
                     >
                         <Clipboard className="w-4 h-4" />
-                        Paste List
+                        Paste
                     </button>
                     <button
                         onClick={() => document.getElementById('import-accounts')?.click()}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent text-white font-semibold text-sm hover:bg-accent/90 transition-all shadow-lg shadow-accent/20"
                     >
                         <RefreshCw className={clsx('w-4 h-4', loading && 'animate-spin')} />
-                        Import Accounts
+                        Upload
                     </button>
                     <button onClick={() => { setLoading(true); fetchResults(); }} className="p-2.5 rounded-xl glass hover:border-white/20 transition-all duration-200 text-slate-400 hover:text-slate-200">
                         <RefreshCw className={clsx('w-4 h-4', loading && 'animate-spin')} />
@@ -266,7 +266,7 @@ export default function AccountsPage() {
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
                                         <Clipboard className="w-5 h-5 text-accent" />
-                                        Paste Account List
+                                        Paste Accounts
                                     </h3>
                                     <button onClick={() => setShowPasteModal(false)} className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-colors">
                                         <X className="w-5 h-5" />
@@ -294,7 +294,7 @@ export default function AccountsPage() {
                                         className="px-6 py-2.5 rounded-xl bg-accent text-white font-bold text-sm hover:opacity-90 transition-all disabled:opacity-50 flex items-center gap-2"
                                     >
                                         {pasting && <Loader2 className="w-4 h-4 animate-spin" />}
-                                        Save All
+                                        Save
                                     </button>
                                 </div>
                             </motion.div>

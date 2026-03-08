@@ -7,7 +7,7 @@ import random as _random
 
 from playwright.sync_api import sync_playwright
 
-from config import HUMANIZE_INPUT, INTER_ACCOUNT_DELAY_MIN_S, INTER_ACCOUNT_DELAY_MAX_S, REUSE_BROWSER_FOR_BATCH, VPN_ROTATE_AFTER_ACCOUNTS, PERSISTENT_CONTEXT
+from config import HUMANIZE_INPUT, INTER_ACCOUNT_DELAY_MIN_S, INTER_ACCOUNT_DELAY_MAX_S, REUSE_BROWSER_FOR_BATCH, VPN_ROTATE_AFTER_ACCOUNTS, PERSISTENT_CONTEXT, RESTART_BROWSER_ON_SUCCESS
 from ip_utils import get_ip_info
 from bot.browser.page_utils import get_or_create_page, close_extra_pages
 
@@ -55,7 +55,16 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                 engine.log("✅ [ENGINE] VPN check passed")
 
                 # Launch browser if needed (or if we need to switch profiles for isolation)
-                if context is None or PERSISTENT_CONTEXT:
+                # Verify browser/context/page are still valid and NOT closed before reuse 
+                # (or force recreate if PERSISTENT_CONTEXT is enabled for isolation)
+                page_is_closed = True
+                try:
+                    if page and not page.is_closed():
+                        page_is_closed = False
+                except:
+                    pass
+                    
+                if context is None or page is None or page_is_closed or PERSISTENT_CONTEXT:
                     try:
                         if context is not None:
                             engine.log(f"🔄 [ENGINE] Closing previous profile context to switch to {email}...")
@@ -283,12 +292,17 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                 elif is_failure:
                     engine.consecutive_failures += 1
 
+                # Account-based VPN rotation trigger
+                # Only count successful or session-risk attempts, not invalid credentials
+                if status != "invalid":
+                    accounts_with_current_browser += 1
+
                 should_change_vpn = (
                     is_blocked
                     or is_rate_limit
                     or (is_something_wrong and engine.consecutive_failures >= 3)
                     or (engine.consecutive_failures >= engine.max_failures_before_vpn_change)
-                    or (VPN_ROTATE_AFTER_ACCOUNTS > 0 and i % VPN_ROTATE_AFTER_ACCOUNTS == 0)
+                    or (VPN_ROTATE_AFTER_ACCOUNTS > 0 and accounts_with_current_browser >= VPN_ROTATE_AFTER_ACCOUNTS)
                 ) and status != "invalid" and not engine.should_stop
 
                 if should_change_vpn and engine.vpn_manager:
@@ -353,7 +367,12 @@ def process_accounts_sequential(engine, credentials: List[Tuple[str, str]], file
                                         pass
                                 return results
 
-                if (is_locked_reset or is_blocked or is_rate_limit or status in ["banned", "error"]) and status != "invalid" and not engine.should_stop:
+                # Only restart for session-risk OR if explicit restart-on-success is enabled
+                should_restart_session = (is_locked_reset or is_blocked or is_rate_limit or status in ["banned", "error"])
+                if status == "success" and RESTART_BROWSER_ON_SUCCESS:
+                    should_restart_session = True
+                
+                if should_restart_session and status != "invalid" and not engine.should_stop:
                     try:
                         engine.log("🔁 Restarting browser due to session-risk issue...")
                         if browser_reuse_start and accounts_with_current_browser > 0:

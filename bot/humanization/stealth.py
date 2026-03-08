@@ -5,7 +5,7 @@ from typing import Optional
 from playwright.sync_api import Page
 
 
-def apply_basic_stealth(page: Page, fingerprint: Optional[dict] = None) -> None:
+def apply_basic_stealth(page: Page, fingerprint: Optional[dict] = None, skip_webdriver: bool = False) -> None:
     """
     Enhanced stealth: patch navigator.webdriver, plugins, languages, WebGL, chrome runtime, permissions, and more.
     Dynamically injects fingerprint parameters if provided.

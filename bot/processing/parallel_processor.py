@@ -8,7 +8,7 @@ from typing import List, Tuple, Dict
 
 from playwright.sync_api import sync_playwright
 
-from config import REUSE_BROWSER_FOR_BATCH, PERSISTENT_CONTEXT
+from config import HUMANIZE_INPUT, INTER_ACCOUNT_DELAY_MIN_S, INTER_ACCOUNT_DELAY_MAX_S, REUSE_BROWSER_FOR_BATCH, PERSISTENT_CONTEXT, RESTART_BROWSER_ON_SUCCESS
 from bot.utils.browser_setup import ensure_playwright_browsers, install_playwright_browsers
 from ip_utils import get_ip_info
 from bot.browser.page_utils import get_or_create_page, close_extra_pages
@@ -122,7 +122,7 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
             Work-Stealing Worker: Pulls accounts from shared queue dynamically.
             Worker stays alive until queue is empty, ensuring maximum browser utilization.
             """
-            nonlocal vpn_rotation_requested  # Allow modification of outer scope variable
+            nonlocal vpn_rotation_requested, accounts_processed_since_vpn_change, error_period_active, batch_retry_error_count, consecutive_retry_failures
             accounts_processed = 0  # Track accounts processed by this worker
             
             try:
@@ -215,9 +215,16 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                         accounts_processed += 1
                         
                         try:
-                            # Verify browser/context/page are still valid before reuse 
+                            # Verify browser/context/page are still valid and NOT closed before reuse 
                             # (or force recreate if PERSISTENT_CONTEXT is enabled for isolation)
-                            if context_w is None or page_w is None or PERSISTENT_CONTEXT:
+                            page_is_closed = True
+                            try:
+                                if page_w and not page_w.is_closed():
+                                    page_is_closed = False
+                            except:
+                                pass
+                                
+                            if context_w is None or page_w is None or page_is_closed or PERSISTENT_CONTEXT:
                                 if PERSISTENT_CONTEXT and context_w is not None:
                                     engine.log(f"🔄 Worker [{worker_id}]: Switching profile context to {email}...")
                                     close_worker_browser("profile switch")
@@ -406,7 +413,22 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                             "original_index": index
                                         })
 
-                            if (is_something_wrong or is_error_occurred or status == "security_block"):
+                            # Restart detection for critical errors (Security Blocks, etc.)
+                            is_locked_reset = (
+                                ('reset' in err_lower and 'password' in err_lower)
+                                or ('locked' in err_lower)
+                                or ('unusual activity' in err_lower)
+                            )
+                            # Restart detection for current account retry
+                            retry_neededv = (
+                                is_something_wrong 
+                                or is_error_occurred 
+                                or (status == "security_block")
+                                or is_locked_reset
+                                or status in ["banned", "error"]
+                            ) and status != "invalid" # NEVER restart for invalid credentials
+
+                            if retry_neededv:
                                 error_type = "security block" if status == "security_block" else ("an error occurred" if is_error_occurred else "something went wrong")
                                 engine.log(f"🔄 Worker retrying {email} due to '{error_type}' error...")
                                 
@@ -570,10 +592,8 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                             with completed_lock:
                                 batch_results.append(result)
                                 results.append(result)
-                                # Track accounts processed for VPN rotation
-                                accounts_processed_since_vpn_change += 1
-                                
                                 # Track accounts during error period (if error period is active)
+                                # This helps identify batch failures during temporary Reddit outages or IP bans
                                 if error_period_active:
                                     with error_period_lock:
                                         # Add to error period accounts if not already added
@@ -585,15 +605,22 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                                 "original_index": index,
                                                 "error_type": "error_period"
                                             })
-                                
+
                                 # Account-based VPN rotation: Rotate after N accounts
-                                if vpn_rotate_after_accounts > 0 and accounts_processed_since_vpn_change >= vpn_rotate_after_accounts:
-                                    if vpn_manager:
-                                        with vpn_rotation_lock:
-                                            if not vpn_rotation_requested:
-                                                vpn_rotation_requested = True
-                                                engine.log(f"🔄 VPN rotation triggered: Account-based rotation ({accounts_processed_since_vpn_change} accounts processed since last VPN change)")
-                                                engine.log(f"📊 Rotation threshold: Every {vpn_rotate_after_accounts} accounts")
+                                # IMPORTANT: Only count successful/clean attempts towards VPN rotation threshold
+                                # Invalid credentials do not "burn" the IP, so we shouldn't rotate because of them.
+                                status_lower = (result.get("status") or "").lower()
+                                if status_lower != 'invalid':
+                                    accounts_processed_since_vpn_change += 1
+                                    
+                                    if vpn_rotate_after_accounts > 0 and accounts_processed_since_vpn_change >= vpn_rotate_after_accounts:
+                                        if vpn_manager:
+                                            with vpn_rotation_lock:
+                                                if not vpn_rotation_requested:
+                                                    vpn_rotation_requested = True
+                                                    engine.log(f"🔄 VPN rotation triggered: Account-based rotation threshold reached ({accounts_processed_since_vpn_change} counts)")
+                                else:
+                                    engine.log(f"♻️  Worker [{worker_id}]: Skipping VPN rotation count for 'invalid' account (IP is still clean)")
 
                             if engine.result_callback:
                                 try:
@@ -638,14 +665,17 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                 else:
                                     engine.log(f"❌ Failed to login (Unclear reason): {email}")
 
-                            # Only restart browser for session-risk issues, NOT for invalid credentials
+                             # Only restart browser for session-risk issues, NOT for invalid credentials
                             # Invalid credentials should reuse the same page/browser
                             should_restart_browser = False
-                            if status != 'invalid':
+                            
+                            # Check if we should restart on success (optional clean-session)
+                            if status == 'success' and RESTART_BROWSER_ON_SUCCESS:
+                                should_restart_browser = True
+                            elif status != 'invalid':
                                 # Check for session-risk issues that require browser restart
                                 if (
-                                    status == 'success'
-                                    or status in ['banned', 'locked']
+                                    status in ['banned', 'locked']
                                     or ('blocked' in err_lower)
                                     or ('rate limit' in err_lower)
                                     or ('too many' in err_lower)
@@ -655,6 +685,7 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                         or ('unusual activity' in err_lower)
                                         or ('blocked' in err_lower)
                                         or ('rate limit' in err_lower)
+                                        or is_locked_reset
                                     ))
                                 ):
                                     should_restart_browser = True
@@ -664,7 +695,7 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                             
                             if should_restart_browser or not REUSE_BROWSER_FOR_BATCH:
                                 reason = f"status: {status}" if should_restart_browser else "REUSE_BROWSER_FOR_BATCH=False"
-                                engine.log(f"🔁 Worker [{worker_id}]: Restarting browser ({reason})...")
+                                engine.log(f"🔁 Worker [{worker_id}]: Explicitly closing browser ({reason})")
                                 try:
                                     if page_w:
                                         try:
@@ -700,9 +731,9 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
                                 # Browser will be recreated at the start of next iteration
                             else:
                                 if status == 'invalid':
-                                    engine.log(f"♻️  Worker [{worker_id}]: Keeping browser open for next account (invalid credentials - will reuse)")
+                                    engine.log(f"♻️  Worker [{worker_id}]: Successfully preserving page/browser for next account (status='invalid')")
                                 else:
-                                    engine.log(f"♻️  Worker [{worker_id}]: Keeping browser open for next account (no restart needed)")
+                                    engine.log(f"♻️  Worker [{worker_id}]: Successfully preserving page/browser for next account (reuse enabled)")
 
                             if engine.progress_callback:
                                 try:
@@ -797,7 +828,17 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
             })
         
         # Determine number of workers (use all available browsers)
-        num_workers = min(parallel_browsers, total_accounts) if parallel_browsers > 1 else 1
+        # BUG FIX: If accounts <= parallel_browsers, we only launch as many workers as needed 
+        # but ensure we don't spawn 1 per account if reuse is possible and desired.
+        # This keeps the browser alive for at least 2 accounts where possible.
+        if parallel_browsers > 1 and REUSE_BROWSER_FOR_BATCH:
+            # Aim for ~2 accounts per worker in small batches to ensure some reuse occurs
+            # while still maintaining parallel speed.
+            ideal_workers = (total_accounts + 1) // 2 
+            num_workers = min(parallel_browsers, ideal_workers)
+            if num_workers < 1: num_workers = 1
+        else:
+            num_workers = min(parallel_browsers, total_accounts) if parallel_browsers > 1 else 1
         
         if parallel_browsers == 1:
             engine.log(f"📦 Work-Stealing Queue: 1 worker will process {total_accounts} account(s) (single browser mode)")
@@ -819,15 +860,25 @@ def process_accounts_parallel(engine, credentials: List[Tuple[str, str]], parall
         engine.log(f"\n✓ Batch {batch_num} completed: {len(batch_results)} accounts processed")
 
         batch_failures = sum(1 for r in batch_results if r.get("status", "").lower() in ["banned", "error"])
-        batch_blocked = any(("blocked" in (r.get("error_message", "") or "").lower()) or ("detect" in (r.get("error_message", "") or "").lower()) for r in batch_results)
-        batch_rate_limit = any(("rate limit" in (r.get("error_message", "") or "").lower()) or ("too many" in (r.get("error_message", "") or "").lower()) for r in batch_results)
+        # CRITICAL FIX: Ensure batch-level VPN triggers EXCLUDE 'invalid' credentials 
+        # to prevent "conflating" account issues with network blocks.
+        batch_blocked = any(
+            (("blocked" in (r.get("error_message", "") or "").lower()) or ("detect" in (r.get("error_message", "") or "").lower())) 
+            for r in batch_results if r.get("status", "").lower() != "invalid"
+        )
+        batch_rate_limit = any(
+            (("rate limit" in (r.get("error_message", "") or "").lower()) or ("too many" in (r.get("error_message", "") or "").lower())) 
+            for r in batch_results if r.get("status", "").lower() != "invalid"
+        )
         batch_something_wrong = any(
-            ("something went wrong logging in" in (r.get("error_message", "") or "").lower())
-            or ("went wrong" in (r.get("error_message", "") or "").lower())
-            or ("an error occurred" in (r.get("error_message", "") or "").lower())
-            or ("disable any extensions" in (r.get("error_message", "") or "").lower())
-            or ("try using a different web browser" in (r.get("error_message", "") or "").lower())
-            for r in batch_results
+            (
+                ("something went wrong logging in" in (r.get("error_message", "") or "").lower())
+                or ("went wrong" in (r.get("error_message", "") or "").lower())
+                or ("an error occurred" in (r.get("error_message", "") or "").lower())
+                or ("disable any extensions" in (r.get("error_message", "") or "").lower())
+                or ("try using a different web browser" in (r.get("error_message", "") or "").lower())
+            )
+            for r in batch_results if r.get("status", "").lower() != "invalid"
         )
         
         # Check if error period is still active (rate limit/too many requests detected during processing)

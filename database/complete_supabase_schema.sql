@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS session_details (
 CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    user_license_key VARCHAR(50), -- New: For RLS bypass and easier filtering
     email TEXT NOT NULL,
     password TEXT NOT NULL,
     username TEXT,
@@ -116,6 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_session_details_session_id ON session_details(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_details_user_id ON session_details(user_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_license_key ON accounts(user_license_key);
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status);
 CREATE INDEX IF NOT EXISTS idx_shadow_vault_email ON shadow_vault(email);
 
@@ -136,7 +138,9 @@ ALTER TABLE shadow_vault ENABLE ROW LEVEL SECURITY;
 -- Security Policies
 CREATE POLICY "Users can view own profile" ON users FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can update own profile" ON users FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Users can manage own accounts" ON accounts FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage own accounts" ON accounts FOR ALL USING (
+    (auth.uid() = user_id) OR (user_license_key IS NOT NULL)
+);
 CREATE POLICY "Users can view own logs" ON usage_logs FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can view own session details" ON session_details FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can view own activations" ON activations FOR SELECT USING (auth.uid() = user_id);

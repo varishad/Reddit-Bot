@@ -39,7 +39,7 @@ class Database:
         """
         # Replace space separator with 'T' for strict ISO-8601
         s = date_str.strip().replace(' ', 'T')
-        # Normalise bare '+00' / '-00' / '+05:30' etc. → always keep coloned form
+        # Normalise bare '+00' / '-00' / '+05:30' etc. -> always keep coloned form
         import re
         s = re.sub(r'([+-])(\d{2}):?(\d{2})$', lambda m: f"{m.group(1)}{m.group(2)}:{m.group(3)}", s)
         # Replace trailing 'Z' with '+00:00'
@@ -138,7 +138,7 @@ class Database:
                     start_date = self._parse_date(start_date_str)
                     if now < start_date:
                         return False, f"Plan Error: Your plan is scheduled to start on {start_date.strftime('%Y-%m-%d')}.", None
-
+ 
                 if end_date_str:
                     end_date = self._parse_date(end_date_str)
                     if now > end_date:
@@ -435,6 +435,7 @@ class Database:
             for acc in accounts:
                 db_entries.append({
                     "user_id": self.current_user_id,
+                    "user_license_key": self.current_license_key, # New: For RLS bypass
                     "email": acc['email'],
                     "password": acc['password'], # Note: Storing plain-text as requested
                     "status": status,
@@ -514,13 +515,22 @@ class Database:
         
         try:
             # Fetch accounts that need checking based on provided statuses
-            res = self.client.table("accounts").select("*")\
-                .eq("user_id", self.current_user_id)\
-                .in_("status", include_statuses)\
+            q = self.client.table("accounts").select("*")
+            
+            # If we have a license key, use it as primary filter (RLS bypass)
+            if self.current_license_key:
+                q = q.eq("user_license_key", self.current_license_key)
+            else:
+                q = q.eq("user_id", self.current_user_id)
+
+            res = q.in_("status", include_statuses)\
                 .limit(limit)\
                 .execute()
             
-            return res.data if res.data else []
+            accounts = res.data if res.data else []
+            logger.info(f"🔍 [DB] Querying status {include_statuses} for key: {self.current_license_key or self.current_user_id}")
+            logger.info(f"🔍 [DB] Result: Found {len(accounts)} accounts")
+            return accounts
         except Exception as e:
             logger.error(f"Error fetching accounts to process: {e}")
             return []
@@ -529,7 +539,11 @@ class Database:
                                karma: Optional[int] = None, error_msg: Optional[str] = None,
                                vpn_location: Optional[str] = None, vpn_ip: Optional[str] = None):
         """Update account status and info in Supabase and handle Shadow Vault logic."""
-        if not self.client or not self.current_user_id:
+        if not self.client:
+            logger.warning(f"⚠️ Supabase client not initialized, skipping update for {email}")
+            return
+        if not self.current_user_id:
+            logger.warning(f"⚠️ No current_user_id set, skipping Supabase update for {email} (status: {status})")
             return
         
         try:
@@ -539,17 +553,22 @@ class Database:
                 "processed_at": datetime.utcnow().isoformat(),
                 "remark": error_msg, # Using error_msg as the remark/exact reason
                 "vpn_location": vpn_location,
-                "vpn_ip": vpn_ip
+                "vpn_ip": vpn_ip,
+                "user_license_key": self.current_license_key # Ensure it's populated
             }
             if username: 
                 update_data["username"] = username
                 update_data["profile_url"] = f"https://www.reddit.com/user/{username}"
             if karma is not None: update_data["karma"] = karma
 
-            res = self.client.table("accounts").update(update_data)\
-                .eq("user_id", self.current_user_id)\
-                .eq("email", email)\
-                .execute()
+            q = self.client.table("accounts").update(update_data)
+            
+            if self.current_license_key:
+                q = q.eq("user_license_key", self.current_license_key)
+            else:
+                q = q.eq("user_id", self.current_user_id)
+
+            res = q.eq("email", email).execute()
             
             if not res.data:
                 logger.warning(f"⚠️ No account found in Supabase to update for {email} (User: {self.current_user_id})")
@@ -738,4 +757,3 @@ class Database:
         except Exception as e:
             logger.error(f"Error cleaning accounts: {e}")
             return False, str(e)
-

@@ -115,6 +115,14 @@ async def startup_event():
 def bot_worker(file_path: str, parallel_browsers: int, batch_limit: int = 100, include_statuses: List[str] = ["pending", "error"]):
     """Thread worker that executes the bot logic."""
     try:
+        # Ensure user is authenticated before starting
+        if not state.db.current_user_id:
+            log_to_state("❌ ERROR: No user authenticated. Please log in first.", "error")
+            state.is_running = False
+            return
+        
+        logger.info(f"🔧 Bot worker starting with user_id: {state.db.current_user_id}")
+        
         with state.lock:
             state.stop_requested = False
             state.is_running = True
@@ -649,15 +657,6 @@ async def get_results():
         except Exception as e:
             logger.error(f"Error fetching persistent accounts: {e}")
 
-    # --- Account Management ---
-    @app.delete("/accounts/{account_id}")
-    async def delete_account(account_id: str):
-        """Delete an account from persistent storage."""
-        success, msg = state.db.delete_account(account_id)
-        if not success:
-            raise HTTPException(status_code=400, detail=msg)
-        return {"status": "success", "message": msg}
-
     # 2. Add/Overlay local session results
     try:
         import json
@@ -668,22 +667,40 @@ async def get_results():
             with open(results_file, 'r') as f:
                 local_results = json.load(f)
             
-            # Use email as key to avoid duplicates (favor local session info if active)
-            seen_emails = {r['email'] for r in combined_results}
+            # Use email as key to avoid duplicates
+            # If the database already has a status other than 'pending', keep the database status
+            # unless the local result is newer (belongs to a very recent session).
+            # For now, let's prioritize DB for 'success'/'invalid' if they exist there.
+            db_emails = {r['email']: i for i, r in enumerate(combined_results)}
+            
             for lr in local_results:
-                if lr['email'] not in seen_emails:
-                    combined_results.append(lr)
+                email = lr.get('email')
+                if email in db_emails:
+                    idx = db_emails[email]
+                    # Only override DB status with local status if:
+                    # The local result is from the CURRENT session (real-time update)
+                    lr_session_id = lr.get('session_id')
+                    is_current_session = lr_session_id and lr_session_id == state.current_session_id
+                    
+                    if is_current_session:
+                        combined_results[idx] = lr
+                        # Otherwise, if it's an old session, trust the DB status (already in combined_results[idx])
                 else:
-                    # Update existing with session info if more recent/specific
-                    for i, cr in enumerate(combined_results):
-                        if cr['email'] == lr['email'] and lr.get('session_id') == state.current_session_id:
-                            combined_results[i] = lr
-                            break
+                    combined_results.append(lr)
                             
     except Exception as e:
         logger.error(f"Error reading local results: {e}")
         
     return combined_results
+
+# --- Account Management ---
+@app.delete("/accounts/{account_id}")
+async def delete_account(account_id: str):
+    """Delete an account from persistent storage."""
+    success, msg = state.db.delete_account(account_id)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "success", "message": msg}
 
 # --- VPN ---
 @app.get("/vpn/status")

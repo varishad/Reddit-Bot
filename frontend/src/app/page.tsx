@@ -233,125 +233,129 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d1424] text-slate-200 p-4 lg:p-6 flex flex-col gap-4 overflow-x-hidden">
+    <div className="min-h-screen bg-[#0d1424] text-slate-200 p-3 sm:p-4 lg:p-6 flex flex-col gap-3 sm:gap-4 overflow-x-hidden">
 
       {/* ── TOP HEADER CONTAINER ────────────────────────────────────────── */}
-      <div className="max-w-7xl mx-auto w-full flex flex-col gap-4">
+      <div className="max-w-full mx-auto w-full flex flex-col gap-3 sm:gap-4 overflow-hidden">
 
         {/* Connection & Telemetry Header */}
         <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden shadow-xl">
           <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-white/10">
 
             {/* Primary Status Section */}
-            <div className="lg:w-1/3 p-6 flex items-center justify-between gap-6 bg-gradient-to-br from-[#ff5a5f]/5 to-transparent">
-              <div className="flex items-center gap-4">
-                <div className="flex flex-col items-center gap-2">
+            <div className="lg:w-2/5 p-3 sm:p-4 md:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 md:gap-8 bg-gradient-to-br from-[#ff5a5f]/5 to-transparent">
+              <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                <div className="flex flex-col items-center gap-1 sm:gap-2">
                   <button
                     onClick={handleToggleBot}
                     disabled={refreshing}
                     className={clsx(
-                      "w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 border-2",
+                      "w-10 h-10 sm:w-12 sm:h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 border-2",
                       isRunning
                         ? "bg-rose-500/20 border-rose-500/50 text-rose-400 shadow-rose-500/10 animate-pulse"
                         : "bg-emerald-500/20 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/30"
                     )}
                   >
-                    <Power className="w-8 h-8" />
+                    <Power className="w-5 h-5 sm:w-6 sm:h-6 md:w-8 md:h-8" />
                   </button>
-                  <span className={clsx("text-[9px] font-black uppercase tracking-[0.2em]", isRunning ? "text-rose-400" : "text-emerald-400")}>
+                  <span className={clsx("text-[8px] sm:text-[9px] font-black uppercase tracking-[0.2em]", isRunning ? "text-rose-400" : "text-emerald-400")}>
                     {isRunning ? "STOP" : "START"}
                   </span>
                 </div>
                 <div className="flex flex-col">
-                  <span className={clsx("text-xl font-bold tracking-tight", isRunning ? "text-rose-400" : "text-slate-300")}>
+                  <span className={clsx("text-sm sm:text-base md:text-xl font-bold tracking-tight", isRunning ? "text-rose-400" : "text-slate-300")}>
                     {isRunning ? "Connected" : "Disconnected"}
                   </span>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <div className={clsx("w-2 h-2 rounded-full", isRunning ? "bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.6)]" : "bg-emerald-400")} />
-                    <span className="text-xs text-white font-extrabold uppercase tracking-widest bg-white/10 px-2 py-0.5 rounded">
-                      {status?.vpn_location || 'Searching Network...'}
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <div className={clsx("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", isRunning ? "bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.6)]" : "bg-emerald-400")} />
+                    <span className="text-[9px] sm:text-[10px] text-white font-bold uppercase tracking-wide bg-white/10 px-1.5 sm:px-2 py-0.5 rounded whitespace-nowrap">
+                      {status?.vpn_location || 'Connecting...'}
                     </span>
                   </div>
                 </div>
               </div>
-              <div className="hidden sm:block text-right">
-                <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest block">Uptime</span>
-                <span className="text-lg font-mono font-bold text-white leading-none">{formatUptime(status?.stats?.uptime_seconds ?? 0)}</span>
+
+              {/* Growth Controls Inline (Relocated for better mobile flow) */}
+              <div className="flex items-center gap-3 bg-white/5 p-2 px-3 rounded-lg border border-white/5">
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-slate-500 font-bold uppercase tracking-tighter">Batch</span>
+                  <input
+                    type="number"
+                    value={batchLimit}
+                    onChange={(e) => setBatchLimit(parseInt(e.target.value) || 1)}
+                    className="w-12 bg-black/40 border-none px-1 text-xs font-bold text-center text-[#ff5a5f] outline-none"
+                  />
+                </div>
+                <div className="w-px h-6 bg-white/10" />
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-slate-500 font-bold uppercase tracking-tighter">Load</span>
+                  <input
+                    type="number"
+                    value={parallelBrowsers}
+                    onChange={(e) => setParallelBrowsers(parseInt(e.target.value) || 1)}
+                    className="w-12 bg-black/40 border-none px-1 text-xs font-bold text-center text-[#ff5a5f] outline-none"
+                  />
+                </div>
               </div>
             </div>
 
             {/* Telemetry Tiles Grid */}
-            <div className="flex-1 grid grid-cols-2 md:grid-cols-4 divide-x divide-white/10">
+            <div className="flex-1 grid grid-cols-2 lg:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-white/10">
 
-              {/* Units Tile */}
-              <div className="p-4 flex flex-col justify-between hover:bg-white/2 transition-colors">
-                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Active Units</span>
-                <div className="flex items-end gap-2 mt-1">
-                  <span className="text-2xl font-bold text-white leading-none">{status?.active_browsers || 0}</span>
-                  <Cpu className="w-4 h-4 text-blue-400 mb-0.5" />
+              {/* Uptime Tile (New Position) */}
+              <div className="p-3 sm:p-4 flex flex-col justify-between hover:bg-white/2 transition-colors">
+                <span className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-widest">Uptime</span>
+                <div className="flex items-end gap-1 sm:gap-2 mt-1">
+                  <span className="text-lg sm:text-2xl font-mono font-bold text-white leading-none tracking-tight">{formatUptime(status?.stats?.uptime_seconds ?? 0)}</span>
+                  <Clock className="w-3 h-3 sm:w-4 sm:h-4 text-amber-400 mb-0.5" />
+                </div>
+              </div>
+
+              <div className="p-3 sm:p-4 flex flex-col justify-between hover:bg-white/2 transition-colors">
+                <span className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-widest">Active Units</span>
+                <div className="flex items-end gap-1 sm:gap-2 mt-1">
+                  <span className="text-lg sm:text-2xl font-bold text-white leading-none">{status?.active_browsers || 0}</span>
+                  <Cpu className="w-3 h-3 sm:w-4 sm:h-4 text-blue-400 mb-0.5" />
                 </div>
               </div>
 
               {/* Rotations Tile */}
-              <div className="p-4 flex flex-col justify-between hover:bg-white/2 transition-colors">
-                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Network Cycles</span>
-                <div className="flex items-end gap-2 mt-1">
-                  <span className="text-2xl font-bold text-white leading-none">{status?.stats?.vpn_rotations || 0}</span>
-                  <RefreshCw className="w-4 h-4 text-emerald-400 mb-0.5" />
+              <div className="p-3 sm:p-4 flex flex-col justify-between hover:bg-white/2 transition-colors border-t border-white/10 sm:border-t-0 sm:border-l border-white/10 lg:border-l-0">
+                <span className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-widest">Network Cycles</span>
+                <div className="flex items-end gap-1 sm:gap-2 mt-1">
+                  <span className="text-lg sm:text-2xl font-bold text-white leading-none">{status?.stats?.vpn_rotations || 0}</span>
+                  <RefreshCw className="w-3 h-3 sm:w-4 sm:h-4 text-emerald-400 mb-0.5" />
                 </div>
               </div>
 
               {/* Success Rate Tile */}
-              <div className="p-4 flex flex-col justify-between hover:bg-white/2 transition-colors">
+              <div className="p-3 sm:p-4 flex flex-col justify-between hover:bg-white/2 transition-colors border-t border-white/10 sm:border-t-0">
                 <div className="flex items-center justify-between">
-                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Success Rate</span>
-                  <span className="text-[10px] font-bold text-emerald-400">{successRate}%</span>
+                  <span className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-widest">Success Rate</span>
+                  <span className="text-[9px] sm:text-[10px] font-bold text-emerald-400">{successRate}%</span>
                 </div>
-                <div className="mt-2.5 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                <div className="mt-1 sm:mt-2 h-1 bg-white/5 rounded-full overflow-hidden">
                   <motion.div initial={{ width: 0 }} animate={{ width: `${successRate}%` }} className="h-full bg-emerald-500" />
                 </div>
               </div>
 
-              {/* Growth Controls Inline Tile */}
-              <div className="p-4 flex flex-col justify-center gap-2 bg-white/[0.02]">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex flex-col">
-                    <span className="text-[8px] text-slate-500 font-bold uppercase">Batch</span>
-                    <input
-                      type="number"
-                      value={batchLimit}
-                      onChange={(e) => setBatchLimit(parseInt(e.target.value) || 1)}
-                      className="w-12 bg-black/40 border border-white/5 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-200 focus:border-[#ff5a5f]/50 outline-none"
-                    />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[8px] text-slate-500 font-bold uppercase">Load</span>
-                    <input
-                      type="number"
-                      value={parallelBrowsers}
-                      onChange={(e) => setParallelBrowsers(parseInt(e.target.value) || 1)}
-                      className="w-12 bg-black/40 border border-white/5 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-200 focus:border-[#ff5a5f]/50 outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
 
             </div>
           </div>
         </div>
 
         {/* ── PROGRESS & ACTIONS ───────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4">
 
           {/* Progress Panel */}
           <div className="lg:col-span-8 bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col justify-between gap-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-[#ff5a5f]">
                 <Activity className="w-4 h-4" />
-                <span className="text-[11px] font-bold tracking-widest">Master Cluster Verification</span>
+                <span className="text-[11px] font-bold tracking-widest">Progress</span>
               </div>
-              <div className="flex items-center gap-4 text-[10px] font-bold">
-                <span className="text-slate-500">{finished} / {total} Processes Completed</span>
+              <div className="flex items-center gap-2 sm:gap-4 text-[10px] font-bold">
+                <span className="text-slate-500">{finished} / {total}</span>
                 <span className="text-[#ff5a5f]">{progressPercent}%</span>
               </div>
             </div>
@@ -362,19 +366,35 @@ export default function DashboardPage() {
 
           {/* Quick Actions Panel */}
           <div className="lg:col-span-4 bg-white/5 border border-white/10 rounded-lg p-3">
-            <button
-              onClick={() => setShowPasteModal(true)}
-              disabled={isRunning || pasting}
-              className={clsx(
-                "w-full h-full group relative overflow-hidden rounded-md font-bold text-[11px] flex items-center justify-center gap-2 transition-all shadow-lg active:scale-[0.98] py-2.5",
-                (isRunning || pasting)
-                  ? "bg-white/5 text-slate-500 border border-white/5 cursor-not-allowed"
-                  : "bg-[#ff5a5f] hover:bg-[#ff5a5f]/90 text-white"
-              )}
-            >
-              <Clipboard className="w-4 h-4" />
-              {isRunning ? "Cycle in Progress" : "Paste Accounts"}
-            </button>
+            <div className="flex items-center gap-2 h-full min-h-[44px]">
+              <button
+                onClick={() => setShowPasteModal(true)}
+                disabled={isRunning || pasting}
+                className={clsx(
+                  "flex-1 h-full group relative overflow-hidden rounded-md font-bold text-[11px] flex items-center justify-center gap-2 transition-all shadow-lg active:scale-[0.98] py-2",
+                  (isRunning || pasting)
+                    ? "bg-white/5 text-slate-500 border border-white/5 cursor-not-allowed"
+                    : "bg-[#ff5a5f] hover:bg-[#ff5a5f]/90 text-white"
+                )}
+              >
+                <Clipboard className="w-4 h-4" />
+                {isRunning ? "Running..." : "Paste"}
+              </button>
+              <button
+                onClick={() => document.getElementById('file-upload-main')?.click()}
+                className="flex-1 h-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-white/5 border border-white/10 rounded-md hover:bg-white/10 text-xs font-bold text-slate-300 transition-all"
+              >
+                <FileUp className="w-4 h-4" />
+                Upload
+                <input type="file" id="file-upload-main" className="hidden" onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    try { await botApi.uploadCredentials(file); handleRefresh(); }
+                    catch (err: any) { alert(err.message); }
+                  }
+                }} />
+              </button>
+            </div>
           </div>
 
         </div>
@@ -383,7 +403,7 @@ export default function DashboardPage() {
         <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden flex flex-col group/logs">
           <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
             <div className="flex items-center gap-3">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Engine Protocol Logs</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Logs</span>
               {isRunning && (
                 <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 rounded text-[9px] font-bold text-emerald-400 border border-emerald-500/20">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
@@ -404,7 +424,7 @@ export default function DashboardPage() {
               <div className="w-px h-4 bg-white/10 mx-1" />
               <button onClick={handleRefresh} className="p-1 px-2 hover:bg-white/5 rounded transition-colors flex items-center gap-1.5 text-slate-500 hover:text-white">
                 <RefreshCw className={clsx("w-3.5 h-3.5", refreshing && "animate-spin")} />
-                <span className="text-[10px] font-bold uppercase tracking-tight">Sync Cluster</span>
+                <span className="text-[10px] font-bold uppercase tracking-tight">Refresh</span>
               </button>
               <button
                 onClick={() => setIsLogsMaximized(true)}
@@ -423,52 +443,41 @@ export default function DashboardPage() {
         <section className="flex flex-col gap-4 mt-2">
           <div className="flex items-center justify-between px-1">
             <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              Inventory Cluster <span className="text-xs font-normal text-slate-500 opacity-50">[{results.length} total]</span>
+              Account List <span className="text-xs font-normal text-slate-500 opacity-50">[{results.length} total]</span>
             </h2>
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
-                <input
-                  type="text"
-                  placeholder="Locate object..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-4 py-2 bg-black/40 border border-white/10 rounded-lg text-xs outline-none focus:border-[#ff5a5f]/50 w-64 shadow-inner"
-                />
-              </div>
-              <button
-                onClick={() => document.getElementById('file-upload-main')?.click()}
-                className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 text-xs font-bold text-slate-300 transition-all shadow-lg"
-              >
-                <FileUp className="w-4 h-4 text-[#ff5a5f]" />
-                Upload File
-                <input type="file" id="file-upload-main" className="hidden" onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    try { await botApi.uploadCredentials(file); handleRefresh(); }
-                    catch (err: any) { alert(err.message); }
-                  }
-                }} />
-              </button>
-            </div>
           </div>
 
-          {/* Compressed Filter Bar */}
-          <div className="flex flex-wrap items-center gap-1 bg-white/5 p-1 rounded-lg border border-white/5 w-full sm:w-fit overflow-x-auto scrollbar-hide">
-            {(['all', 'pending', 'success', 'invalid', 'banned', 'error'] as const).map(f => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={clsx(
-                  "px-4 py-1.5 rounded-md text-[10px] font-bold border transition-all capitalize whitespace-nowrap flex-1 sm:flex-initial",
-                  filter === f
-                    ? "bg-[#ff5a5f] border-[#ff5a5f] text-white shadow-lg shadow-[#ff5a5f]/20"
-                    : "border-transparent text-slate-500 hover:text-slate-200"
-                )}
-              >
-                {f} <span className="ml-1 px-1.5 py-0.5 bg-black/30 rounded text-inherit opacity-60">{counts[f]}</span>
-              </button>
-            ))}
+          {/* Search and Filter Bar */}
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 px-1">
+            {/* Filter Tabs */}
+            <div className="flex items-center gap-1 bg-white/5 p-1 rounded-lg border border-white/5 overflow-x-auto scrollbar-hide h-10">
+              {(['all', 'pending', 'success', 'invalid', 'banned', 'error'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={clsx(
+                    "px-4 h-full rounded-md text-[10px] font-bold border transition-all capitalize whitespace-nowrap flex items-center justify-center gap-2",
+                    filter === f
+                      ? "bg-[#ff5a5f] border-[#ff5a5f] text-white shadow-lg shadow-[#ff5a5f]/20"
+                      : "border-transparent text-slate-500 hover:text-slate-200"
+                  )}
+                >
+                  {f} <span className="px-1.5 py-0.5 bg-black/30 rounded text-[9px] opacity-60 font-mono tracking-tighter">{counts[f]}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Search */}
+            <div className="relative flex-1 md:flex-none md:w-80 group">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-[#ff5a5f] transition-colors" />
+              <input
+                type="text"
+                placeholder="Search cluster data..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 bg-white/5 border border-white/5 rounded-lg text-xs text-slate-200 outline-none focus:border-[#ff5a5f]/50 h-10 transition-all placeholder:text-slate-600 focus:bg-white/[0.08]"
+              />
+            </div>
           </div>
 
           {/* Industrial Grid Style Table */}
@@ -633,8 +642,8 @@ export default function DashboardPage() {
                     <Power className="w-5 h-5 text-emerald-400" />
                   </div>
                   <div className="flex flex-col">
-                    <h3 className="text-base font-bold text-white tracking-tight">Initialize Engine</h3>
-                    <p className="text-[10px] text-slate-500 font-bold tracking-widest">Select target identities</p>
+                    <h3 className="text-base font-bold text-white tracking-tight">Start Bot</h3>
+                    <p className="text-[10px] text-slate-500 font-bold tracking-widest">Select accounts to process</p>
                   </div>
                 </div>
                 <button onClick={() => setShowStartModal(false)} className="p-1.5 hover:bg-white/5 text-slate-600 hover:text-white rounded-lg transition-colors"><X className="w-5 h-5" /></button>
@@ -672,10 +681,10 @@ export default function DashboardPage() {
                   className="w-full py-3 bg-[#ff5a5f] text-white rounded-lg text-xs font-black tracking-[0.1em] hover:bg-[#ff5a5f]/90 shadow-xl shadow-[#ff5a5f]/20 disabled:opacity-30 flex items-center justify-center gap-2 transition-all active:scale-95"
                 >
                   <Zap className="w-4 h-4" />
-                  Start Processor Cycle
+                  Start
                 </button>
                 <button onClick={() => setShowStartModal(false)} className="text-[10px] font-bold text-slate-600 tracking-widest hover:text-slate-400 transition-colors py-1">
-                  Cancel Initialization
+                  Cancel
                 </button>
               </div>
             </motion.div>
@@ -695,8 +704,8 @@ export default function DashboardPage() {
                     <Clipboard className="w-6 h-6 text-[#ff5a5f]" />
                   </div>
                   <div className="flex flex-col">
-                    <h3 className="text-xl font-bold text-white tracking-tight">Bulk Identity Import</h3>
-                    <p className="text-xs text-slate-500 font-medium">Standard injection protocol. Supports single or multi-line batches.</p>
+                    <h3 className="text-xl font-bold text-white tracking-tight">Paste Accounts</h3>
+                    <p className="text-xs text-slate-500 font-medium">Enter accounts in email:password format, one per line.</p>
                   </div>
                 </div>
                 <button onClick={() => setShowPasteModal(false)} className="p-2 hover:bg-white/5 text-slate-600 hover:text-white rounded-lg transition-colors"><X className="w-6 h-6" /></button>
@@ -716,14 +725,14 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex justify-end gap-3 mt-2">
-                <button onClick={() => setShowPasteModal(false)} className="px-6 py-2.5 text-xs font-bold text-slate-500 hover:text-slate-200 transition-all">Abort</button>
+                <button onClick={() => setShowPasteModal(false)} className="px-6 py-2.5 text-xs font-bold text-slate-500 hover:text-slate-200 transition-all">Cancel</button>
                 <button
                   onClick={handlePasteSubmit}
                   disabled={pasting || !pasteText.trim()}
                   className="px-8 py-2.5 bg-[#ff5a5f] text-white rounded-lg text-xs font-bold hover:bg-[#ff5a5f]/90 shadow-xl shadow-[#ff5a5f]/20 disabled:opacity-30 flex items-center gap-2 group transition-all active:scale-95"
                 >
                   {pasting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4 group-hover:animate-pulse" />}
-                  Start Injection Cycle
+                  Save
                 </button>
               </div>
             </motion.div>

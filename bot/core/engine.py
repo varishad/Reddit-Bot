@@ -78,6 +78,17 @@ class RedditBotEngine:
         except Exception:
             self.max_failures_before_vpn_change = 3  # sensible default
         self.current_vpn_location = None
+        if self.vpn_manager and not skip_vpn_init:
+            # Sync with current manager state
+            try:
+                # We need to run this async if it's an async method
+                # This assumes self._run_async is available (it is in RedditBotEngine)
+                is_connected, loc = self._run_async(self.vpn_manager.get_status())
+                if is_connected:
+                    self.current_vpn_location = loc
+                    self.log(f"📍 [ENGINE] Initial VPN Location: {loc}")
+            except:
+                pass
         self.vpn_rotations = 0
         self.last_vpn_reason = ""
         
@@ -283,8 +294,14 @@ class RedditBotEngine:
                         result["error_message"] = "Failed to install Playwright browsers. Please wait for download to complete and try again."
                         return result
                     self.log("Browsers installed successfully! Retrying login...")
-                    # Retry after installation
-                    return self.login_to_reddit(email, password, playwright, first_attempt=False)
+                    # Retry after installation - PROPAGATE ALL ARGUMENTS
+                    return self.login_to_reddit(
+                        email, password, playwright, 
+                        first_attempt=False, 
+                        reuse_context=reuse_context, 
+                        reuse_page=reuse_page, 
+                        profile_name=profile_name
+                    )
             
             # Use existing context if provided (reuse browser), otherwise launch new
             if reuse_context:
@@ -522,9 +539,9 @@ class RedditBotEngine:
                     self.log("✅ [ENGINE] Page closed")
                 except Exception as e:
                     self.log(f"⚠️  [ENGINE] Error closing page: {str(e)}")
-            else:
-                if reuse_page:
-                    self.log("♻️  [ENGINE] Keeping page open (reusing for next account)")
+            elif reuse_page:
+                # Extra safety: Ensure the reused page is still valid and cleared for next use
+                self.log("♻️  [ENGINE] Successfully preserved page for next account (reusing)")
             # Only close context/browser if we created them here (not reusing)
             if not reuse_context:
                 if context:
@@ -554,11 +571,14 @@ class RedditBotEngine:
         credentials = []
         
         # 1. INDUSTRIAL PRIORITY: Check Database first if we have a user
+        self.log(f"🔍 [ENGINE] Checking database for user: {self.db.current_user_id} (Status filter: {include_statuses})")
         if self.db.current_user_id:
             db_accounts = self.db.get_accounts_to_process(limit=batch_limit, include_statuses=include_statuses)
             if db_accounts:
-                self.log(f"📦 [INDUSTRIAL] Fetched {len(db_accounts)} accounts from Supabase Master List (Filter: {', '.join(include_statuses)})")
+                self.log(f"📦 [INDUSTRIAL] Fetched {len(db_accounts)} accounts from Supabase Master List")
                 credentials = [(acc['email'], acc.get('password')) for acc in db_accounts]
+            else:
+                self.log(f"⚠️  [INDUSTRIAL] No accounts found in DB for user {self.db.current_user_id} with status {include_statuses}")
         
         # 2. FALLBACK: Check local file only if DB is empty or explicitly requested
         if not credentials and file_path and os.path.exists(file_path):
@@ -566,7 +586,7 @@ class RedditBotEngine:
             credentials = self.parse_credentials(file_path)
 
         if not credentials:
-            self.log("No valid credentials found (checked local file and database)")
+            self.log(f"No valid credentials found (User ID: {self.db.current_user_id}, Filter: {include_statuses})")
             return []
         
         self.log(f"Found {len(credentials)} credential(s) to process")

@@ -31,70 +31,11 @@ def detect_status(page, log_callback: Optional[Callable] = None) -> Tuple[str, O
         
         current_url = page.url
         page_content = page.content().lower()
+        page_text = page.inner_text('body').lower() if page.query_selector('body') else ""
         
-        # 3. Check for account locked / temporarily locked / password reset required
-        # Covers banners like: "we've locked your account after detecting some unusual activity... reset your password"
-        locked_indicators = [
-            'account locked',
-            'temporarily locked',
-            'locked for security',
-            'suspicious activity',
-            'locked your account',
-            'unusual activity',
-            'reset your password'
-        ]
-        if any(indicator in page_text for indicator in locked_indicators):
-            # Prefer precise wording when reset is required
-            if 'reset your password' in page_text:
-                return ('error', None, None, 'Account locked due to unusual activity - Password reset required')
-            return ('error', None, None, 'Account temporarily locked due to unusual activity')
-        
-        # 4. Check for banned/suspended (specific messages)
-        banned_selectors = [
-            'div[role="alert"]',
-            '.AnimatedForm__errorMessage',
-            '[data-testid="login-error"]',
-            '.error',
-            'div:has-text("suspended")',
-            'div:has-text("banned")',
-            'div:has-text("permanently")',
-            'h1:has-text("suspended")',
-            'h1:has-text("banned")'
-        ]
-        
-        for selector in banned_selectors:
-            try:
-                error_elem = page.query_selector(selector)
-                if error_elem:
-                    error_text = error_elem.inner_text().strip()
-                    error_lower = error_text.lower()
-                    if 'suspended' in error_lower or 'banned' in error_lower:
-                        # Return the actual error message
-                        if error_text:
-                            return ('banned', None, None, error_text)
-            except:
-                continue
-        
-        # Check page content for banned/suspended keywords
-        if 'suspended' in page_text or 'banned' in page_text:
-            # Try to get more specific message
-            try:
-                # Look for common Reddit suspension messages
-                if 'permanently suspended' in page_text:
-                    return ('banned', None, None, 'Account permanently suspended by Reddit')
-                elif 'temporarily suspended' in page_text:
-                    return ('banned', None, None, 'Account temporarily suspended by Reddit')
-                elif 'banned' in page_text:
-                    return ('banned', None, None, 'Account banned by Reddit')
-                elif 'suspended' in page_text:
-                    return ('banned', None, None, 'Account suspended by Reddit')
-            except:
-                pass
-            return ('banned', None, None, 'Account appears to be suspended or banned')
-        
-        # 5. Check if still on login page (invalid credentials or other login errors)
+        # 3. Check if we're on the login page - PRIORITIZE specific login errors
         if 'login' in current_url.lower() or '/login' in current_url:
-            # Look for specific error messages
+            # Look for specific error messages first
             error_selectors = [
                 'div[role="alert"]',
                 '.AnimatedForm__errorMessage',
@@ -119,38 +60,52 @@ def detect_status(page, log_callback: Optional[Callable] = None) -> Tuple[str, O
                             norm = normalize_login_error(error_lower)
                             if norm:
                                 return norm
-                            # Map common phrases to precise reasons
-                            # Check for browser/extension errors first (should be retried, not marked invalid)
+                            
+                            # Check for browser/extension errors (should be retried, not marked invalid)
                             if 'an error occurred' in error_lower or 'disable any extensions' in error_lower or 'try using a different web browser' in error_lower:
                                 return ('error', None, None, error_text)
+                            
+                            # Check for account-level issues that should definitely trigger status changes
+                            if 'suspended' in error_lower or 'banned' in error_lower:
+                                return ('banned', None, None, error_text)
+                            if any(k in error_lower for k in ['locked', 'unusual activity', 'reset your password']):
+                                return ('error', None, None, f"Account Issues: {error_text}")
+
+                            # Specific invalid cases
                             if 'invalid email or password' in error_lower:
                                 return ('invalid', None, None, 'Invalid email or password.')
                             if 'something went wrong logging in' in error_lower:
                                 return ('error', None, None, 'Something went wrong logging in. Please try again.')
                             if any(k in error_lower for k in ['too many', 'rate limit', 'try again later']):
                                 return ('error', None, None, 'Rate limited - Too many requests. Please wait and try again.')
+                            
                             # Generic invalid cases
                             if any(word in error_lower for word in ['incorrect', 'wrong']) and any(w in error_lower for w in ['password','username','email','credentials']):
                                 return ('invalid', None, None, 'Invalid email or password.')
                             if any(word in error_lower for word in ['invalid','credentials']) and any(w in error_lower for w in ['password','username','email']):
                                 return ('invalid', None, None, 'Invalid email or password.')
-                            # Check for other login errors
-                            elif 'error' in error_lower or 'failed' in error_lower:
-                                return ('error', None, None, error_text)
                 except:
                     continue
             
-            # If still on login page but no error message found, check if form is still visible
-            try:
-                login_form = page.query_selector('form, input[name="username"], input[type="password"]')
-                if login_form:
-                    # Form still visible means login failed
-                    return ('invalid', None, None, 'Invalid email or password.')
-            except:
-                pass
-            
-            # Default invalid message
-            return ('invalid', None, None, 'Invalid email or password.')
+            # FALLBACK: If we are still on the login page after an attempt, and no specific 
+            # error was identified, it's almost certainly an invalid credential or 
+            # generic rejection that should NOT trigger a browser restart.
+            # We return 'invalid' here to prevent the processor from restarting the session.
+            return ('invalid', None, None, 'Invalid email or password (fallback detection).')
+
+        # 4. Check for account locked / temporarily locked / password reset required (BANNERS/CONTENT)
+        # Covers banners like: "we've locked your account after detecting some unusual activity... reset your password"
+        locked_indicators = [
+            'account locked',
+            'temporarily locked',
+            'locked for security',
+            'suspicious activity',
+            'locked your account',
+        ]
+        if any(indicator in page_text for indicator in locked_indicators):
+            if 'reset your password' in page_text:
+                return ('error', None, None, 'Account locked due to unusual activity - Password reset required')
+            return ('error', None, None, 'Account temporarily locked due to unusual activity')
         
         # 6. Check for success (redirected away from login page)
         if 'login' not in current_url.lower() and '/login' not in current_url:

@@ -534,10 +534,14 @@ class ExpressVPNManager:
             
             # Disconnect first if connected
             # For expressvpnctl, we can just call connect and it will switch, but let's be safe
-            is_connected, _ = await self.get_status()
+            is_connected, _ = await self.get_status(force=True)
             if is_connected:
                 await self.disconnect()
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(2.0) # Increased to allow CLI to stabilize
+            
+            # Clear cache before connect
+            self._cached_status = (False, None)
+            self._last_status_check = 0
             
             # Build command
             if location:
@@ -597,8 +601,8 @@ class ExpressVPNManager:
                 self.log("✅ Expressvpnctl connection initiated successfully (silent).")
                 # Wait for connection to establish, polling up to 4 times
                 for _ in range(4):
-                    await asyncio.sleep(1.5)
-                    is_connected, status_msg = await self.get_status()
+                    await asyncio.sleep(2.0) # Increased polling delay
+                    is_connected, status_msg = await self.get_status(force=True)
                     if is_connected:
                         return True, status_msg
                     self.log(f"Connection pending... ({status_msg})")
@@ -663,6 +667,8 @@ class ExpressVPNManager:
             returncode, stdout, stderr = await self._run_command_async(cmd, timeout=30)
             self.is_connected = False
             self.current_location = None
+            self._cached_status = (False, "Disconnected")
+            self._last_status_check = 0
             return True, "Disconnected"
         except Exception as e:
             return False, f"Disconnect failed: {str(e)}"

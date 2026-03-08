@@ -8,10 +8,16 @@ import tempfile
 
 
 def ensure_playwright_browsers():
-    """Ensure Playwright browsers are installed. Check by trying to launch."""
+    """Ensure Playwright browsers are installed. Check by trying to launch or checking path."""
     try:
         from playwright.sync_api import sync_playwright
-        from config import BROWSER_TYPE
+        from config import BROWSER_TYPE, BROWSER_EXECUTABLE_PATH
+        import pathlib
+        
+        # If custom executable path is provided and exists, we're good
+        if BROWSER_EXECUTABLE_PATH and pathlib.Path(BROWSER_EXECUTABLE_PATH).exists():
+            return True
+            
         with sync_playwright() as p:
             try:
                 # Try to launch browser based on config
